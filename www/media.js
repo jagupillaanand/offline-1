@@ -14,6 +14,35 @@
 window.SochMedia = {
 
   /**
+   * CONVERT DROPBOX URL TO DIRECT DOWNLOAD
+   * Dropbox URLs need special handling to work as direct download links.
+   * Converts sharing URLs to direct download URLs by adding dl=1 parameter.
+   * 
+   * @param {string} url - Original Dropbox URL
+   * @returns {string} - Direct download URL
+   */
+  convertDropboxUrl: function(url) {
+    if (!url.includes('dropbox.com')) {
+      return url; // Not a Dropbox URL, return as-is
+    }
+    
+    try {
+      // Remove existing dl parameter if present
+      let cleanUrl = url.replace(/[?&]dl=[01]/, '');
+      
+      // Add direct download parameter
+      const separator = cleanUrl.includes('?') ? '&' : '?';
+      const directUrl = cleanUrl + separator + 'dl=1';
+      
+      console.log("�� Converted Dropbox URL:", url, "→", directUrl);
+      return directUrl;
+    } catch (err) {
+      console.error("❌ Error converting Dropbox URL:", err);
+      return url; // Return original if conversion fails
+    }
+  },
+
+  /**
    * SHOW PROGRESS BAR
    * Displays a visual progress bar in the UI during file downloads.
    * Updates both console logs and user interface with download progress.
@@ -49,10 +78,81 @@ window.SochMedia = {
   },
 
   /**
+   * IMPROVED FILENAME EXTRACTION FOR DROPBOX
+   * Generates better filenames specifically for Dropbox URLs.
+   * Handles the new Dropbox URL format and ensures unique filenames.
+   * 
+   * @param {string} url - The URL to extract filename from
+   * @param {string} prefix - Prefix for the filename (e.g., style code)
+   * @returns {string} - A safe, unique filename
+   */
+  getFileNameFromUrl: function(url, prefix = "") {
+    try {
+      // For Dropbox URLs, extract the file ID from the path
+      if (url.includes('dropbox.com')) {
+        // New Dropbox URL format: /scl/fi/FILE_ID/FILENAME.ext
+        const sclMatch = url.match(/\/scl\/fi\/([^\/]+)\/([^\/\?]+)/);
+        if (sclMatch) {
+          const fileId = sclMatch[1];
+          const originalName = sclMatch[2];
+          
+          // Extract extension from original filename or URL
+          let extension = '.mp4'; // Default for videos
+          const extMatch = originalName.match(/\.([a-zA-Z0-9]+)$/);
+          if (extMatch) {
+            extension = '.' + extMatch[1].toLowerCase();
+          } else if (url.includes('.jpg') || url.includes('.jpeg')) {
+            extension = '.jpg';
+          } else if (url.includes('.png')) {
+            extension = '.png';
+          }
+          
+          // Create filename: prefix + first 8 chars of file ID + extension
+          const shortFileId = fileId.substring(0, 8);
+          const fileName = prefix + shortFileId + extension;
+          
+          console.log(`📝 Generated filename for Dropbox: ${fileName}`);
+          return fileName;
+        }
+        
+        // Fallback for old Dropbox URL format
+        const oldMatch = url.match(/\/([^\/\?]+)\.(mp4|mov|avi|mkv|jpg|jpeg|png|gif)/i);
+        if (oldMatch) {
+          return prefix + oldMatch[1] + '.' + oldMatch[2].toLowerCase();
+        }
+        
+        // Final fallback for Dropbox
+        const urlHash = btoa(url).substring(0, 8).replace(/[\/\+]/g, '');
+        return prefix + urlHash + '.mp4';
+      }
+      
+      // Handle regular URLs (non-Dropbox)
+      const urlParts = url.split('/');
+      let fileName = urlParts[urlParts.length - 1];
+      fileName = fileName.split('?')[0]; // Remove query parameters
+      
+      if (fileName && fileName.includes('.')) {
+        const urlHash = btoa(url).substring(0, 8).replace(/[\/\+]/g, '');
+        return prefix + urlHash + '_' + fileName;
+      }
+      
+      // Final fallback: generate filename from URL with appropriate extension
+      const urlHash = btoa(url).substring(0, 8).replace(/[\/\+]/g, '');
+      const extension = url.includes('.mp4') ? '.mp4' : 
+                       url.includes('.jpg') ? '.jpg' : 
+                       url.includes('.png') ? '.png' : '.jpg';
+      return prefix + urlHash + extension;
+    } catch (err) {
+      console.error("❌ Error extracting filename from URL:", err);
+      // Emergency fallback using timestamp
+      return prefix + Date.now() + '.jpg';
+    }
+  },
+
+  /**
    * EXTRACT UNIQUE MEDIA FILES FROM JSON
    * Analyzes the JSON data to create a map of unique media files to download.
-   * Prevents downloading the same URL multiple times even if it appears
-   * in multiple products (like same video used for image_url and video fields).
+   * FIXED: Better handling of identical URLs and improved Dropbox support.
    * 
    * @param {Object} jsonData - The collection JSON data
    * @returns {Map} - Map of unique URLs to file information
@@ -69,15 +169,18 @@ window.SochMedia = {
       
       // Process collection banner image
       if (collection.collection_image_url && !urlToFileMap.has(collection.collection_image_url)) {
-        const fileName = window.SochStorage.getFileNameFromUrl(
+        const fileName = this.getFileNameFromUrl(
           collection.collection_image_url, 
           `collection_${collectionKey}_`
         );
+        const directUrl = this.convertDropboxUrl(collection.collection_image_url);
+        
         urlToFileMap.set(collection.collection_image_url, { 
           fileName, 
           folder: 'images',
           type: 'collection_image',
-          collectionKey 
+          collectionKey,
+          directUrl // Store the direct download URL
         });
         console.log(`📷 Found collection image: ${collectionKey}`);
       }
@@ -88,30 +191,36 @@ window.SochMedia = {
           
           // Process product image (avoid duplicates)
           if (product.image_url && !urlToFileMap.has(product.image_url)) {
-            const fileName = window.SochStorage.getFileNameFromUrl(
+            const fileName = this.getFileNameFromUrl(
               product.image_url, 
-              `${product.style_code}_`
+              `${product.style_code}_img_`
             );
+            const directUrl = this.convertDropboxUrl(product.image_url);
+            
             urlToFileMap.set(product.image_url, { 
               fileName, 
               folder: 'images',
               type: 'product_image',
-              styleCode: product.style_code 
+              styleCode: product.style_code,
+              directUrl
             });
             console.log(`📷 Found product image: ${product.style_code}`);
           }
           
           // Process product video (avoid duplicates)
           if (product.video && !urlToFileMap.has(product.video)) {
-            const fileName = window.SochStorage.getFileNameFromUrl(
+            const fileName = this.getFileNameFromUrl(
               product.video, 
-              `${product.style_code}_`
+              `${product.style_code}_vid_`
             );
+            const directUrl = this.convertDropboxUrl(product.video);
+            
             urlToFileMap.set(product.video, { 
               fileName, 
               folder: 'videos',
               type: 'product_video',
-              styleCode: product.style_code 
+              styleCode: product.style_code,
+              directUrl
             });
             console.log(`🎥 Found product video: ${product.style_code}`);
           }
@@ -120,13 +229,118 @@ window.SochMedia = {
     });
     
     console.log(`📊 Found ${urlToFileMap.size} unique media files to download`);
+    
+    // Log breakdown by type
+    const imageCount = Array.from(urlToFileMap.values()).filter(f => f.folder === 'images').length;
+    const videoCount = Array.from(urlToFileMap.values()).filter(f => f.folder === 'videos').length;
+    console.log(`   - Images: ${imageCount}`);
+    console.log(`   - Videos: ${videoCount}`);
+    
     return urlToFileMap;
+  },
+
+  /**
+   * CLEANUP UNUSED FILES
+   * Removes files from local storage that are no longer referenced in the current JSON.
+   * This prevents storage bloat when content is updated and old files are no longer needed.
+   * 
+   * @param {Object} jsonData - Current JSON data with active file references
+   */
+  cleanupUnusedFiles: async function(jsonData) {
+    const config = window.SochConfig;
+    
+    // Skip cleanup in browser mode
+    if (!config.isCapacitor) {
+      console.log("📱 Browser mode - skipping file cleanup");
+      return;
+    }
+
+    try {
+      console.log("🧹 Starting cleanup of unused files...");
+      
+      // Get current active media files from JSON
+      const activeUrls = this.extractUniqueMediaFiles(jsonData);
+      const activeImageFiles = new Set();
+      const activeVideoFiles = new Set();
+      
+      // Build sets of currently needed filenames
+      for (const [url, fileInfo] of activeUrls) {
+        if (fileInfo.folder === 'images') {
+          activeImageFiles.add(fileInfo.fileName);
+        } else if (fileInfo.folder === 'videos') {
+          activeVideoFiles.add(fileInfo.fileName);
+        }
+      }
+      
+      console.log(`📊 Active files - Images: ${activeImageFiles.size}, Videos: ${activeVideoFiles.size}`);
+      
+      const { Filesystem } = config.getPlugins();
+      let deletedCount = 0;
+      
+      // Clean up images folder
+      try {
+        console.log("🧹 Cleaning images folder...");
+        const imageDir = await Filesystem.readdir({
+          path: `${config.APP_FOLDER}/images`,
+          directory: 'DOCUMENTS'
+        });
+        
+        for (const file of imageDir.files) {
+          if (file.type === 'file' && !activeImageFiles.has(file.name)) {
+            try {
+              await Filesystem.deleteFile({
+                path: `${config.APP_FOLDER}/images/${file.name}`,
+                directory: 'DOCUMENTS'
+              });
+              console.log(`🗑️ Deleted unused image: ${file.name}`);
+              deletedCount++;
+            } catch (deleteErr) {
+              console.error(`❌ Failed to delete image ${file.name}:`, deleteErr);
+            }
+          }
+        }
+      } catch (err) {
+        console.log("ℹ️ No images folder found or already empty");
+      }
+      
+      // Clean up videos folder
+      try {
+        console.log("🧹 Cleaning videos folder...");
+        const videoDir = await Filesystem.readdir({
+          path: `${config.APP_FOLDER}/videos`,
+          directory: 'DOCUMENTS'
+        });
+        
+        for (const file of videoDir.files) {
+          if (file.type === 'file' && !activeVideoFiles.has(file.name)) {
+            try {
+              await Filesystem.deleteFile({
+                path: `${config.APP_FOLDER}/videos/${file.name}`,
+                directory: 'DOCUMENTS'
+              });
+              console.log(`🗑️ Deleted unused video: ${file.name}`);
+              deletedCount++;
+            } catch (deleteErr) {
+              console.error(`❌ Failed to delete video ${file.name}:`, deleteErr);
+            }
+          }
+        }
+      } catch (err) {
+        console.log("ℹ️ No videos folder found or already empty");
+      }
+      
+      console.log(`✅ Cleanup completed - ${deletedCount} unused files removed`);
+      
+    } catch (err) {
+      console.error("❌ File cleanup process failed:", err);
+      // Don't throw error - cleanup failure shouldn't stop the app
+    }
   },
 
   /**
    * DOWNLOAD ALL MEDIA FILES
    * Downloads all unique media files from the JSON data with progress tracking.
-   * Skips files that already exist locally and shows progress to user.
+   * FIXED: Uses direct Dropbox URLs and better error handling.
    * 
    * @param {Object} jsonData - The collection JSON data containing media URLs
    * @returns {Promise<void>}
@@ -148,29 +362,38 @@ window.SochMedia = {
       const totalFiles = urlToFileMap.size;
       let downloadCount = 0;
       let skippedCount = 0;
+      let errorCount = 0;
       
       console.log(`📊 Total unique media files to process: ${totalFiles}`);
       
       // Step 2: Download each unique file with progress updates
-      for (const [url, fileInfo] of urlToFileMap) {
+      for (const [originalUrl, fileInfo] of urlToFileMap) {
         try {
           // Show current progress
           this.showProgressBar(downloadCount, totalFiles, "Downloading media files");
           
+          // Use the direct download URL for Dropbox files
+          const downloadUrl = fileInfo.directUrl || originalUrl;
+          console.log(`⬇️ Downloading: ${fileInfo.fileName} from ${downloadUrl}`);
+          
           // Attempt to download the file (will skip if already exists)
           const result = await window.SochStorage.downloadFile(
-            url, 
+            downloadUrl, // Use direct URL instead of original
             `${config.APP_FOLDER}/${fileInfo.folder}`, 
             fileInfo.fileName
           );
           
           if (result === null) {
             skippedCount++; // File was skipped (already exists or duplicate)
+            console.log(`⏭️ Skipped: ${fileInfo.fileName}`);
+          } else {
+            console.log(`✅ Downloaded: ${fileInfo.fileName}`);
           }
           
           downloadCount++;
         } catch (err) {
           console.error(`❌ Failed to download ${fileInfo.fileName}:`, err);
+          errorCount++;
           downloadCount++; // Still increment to keep progress accurate
         }
       }
@@ -180,7 +403,15 @@ window.SochMedia = {
       console.log(`✅ Media download process completed:`);
       console.log(`   - Total files processed: ${totalFiles}`);
       console.log(`   - Files skipped (already existed): ${skippedCount}`);
-      console.log(`   - New files downloaded: ${totalFiles - skippedCount}`);
+      console.log(`   - New files downloaded: ${totalFiles - skippedCount - errorCount}`);
+      console.log(`   - Download errors: ${errorCount}`);
+      
+      if (errorCount > 0) {
+        console.warn(`⚠️ ${errorCount} files failed to download - app will use remote URLs for those`);
+      }
+      
+      // Step 4: Cleanup unused files after downloads
+      await this.cleanupUnusedFiles(jsonData);
       
     } catch (err) {
       console.error("❌ Media download process failed:", err);
@@ -208,14 +439,7 @@ window.SochMedia = {
   /**
    * REPLACE REMOTE URLS WITH LOCAL PATHS
    * Processes the JSON data and replaces all remote URLs with local file paths.
-   * This enables the flipbook to use downloaded files instead of fetching from internet.
-   * 
-   * Process:
-   * 1. Creates a deep copy of the JSON data
-   * 2. Finds each media URL in the data
-   * 3. Generates the expected local filename
-   * 4. Gets the local file URI
-   * 5. Replaces the remote URL with local URI
+   * FIXED: Uses the same filename generation logic as download process.
    * 
    * @param {Object} jsonData - Original JSON data with remote URLs
    * @returns {Object} - Modified JSON data with local file URIs
@@ -243,7 +467,7 @@ window.SochMedia = {
         
         // Replace collection banner image URL
         if (collection.collection_image_url) {
-          const fileName = window.SochStorage.getFileNameFromUrl(
+          const fileName = this.getFileNameFromUrl(
             collection.collection_image_url, 
             `collection_${collectionKey}_`
           );
@@ -253,6 +477,8 @@ window.SochMedia = {
             collection.collection_image_url = localUri;
             console.log(`🔄 Replaced collection image URL: ${collectionKey}`);
             replacementCount++;
+          } else {
+            console.log(`⚠️ Local file not found for collection image: ${collectionKey}, keeping remote URL`);
           }
         }
         
@@ -262,9 +488,9 @@ window.SochMedia = {
             
             // Replace product image URL
             if (product.image_url) {
-              const fileName = window.SochStorage.getFileNameFromUrl(
+              const fileName = this.getFileNameFromUrl(
                 product.image_url, 
-                `${product.style_code}_`
+                `${product.style_code}_img_`
               );
               const localUri = await window.SochStorage.getLocalFileUri('images', fileName);
               
@@ -272,14 +498,16 @@ window.SochMedia = {
                 product.image_url = localUri;
                 console.log(`🔄 Replaced product image URL: ${product.style_code}`);
                 replacementCount++;
+              } else {
+                console.log(`⚠️ Local file not found for product image: ${product.style_code}, keeping remote URL`);
               }
             }
             
             // Replace product video URL with mobile-compatible format
             if (product.video) {
-              const fileName = window.SochStorage.getFileNameFromUrl(
+              const fileName = this.getFileNameFromUrl(
                 product.video, 
-                `${product.style_code}_`
+                `${product.style_code}_vid_`
               );
               const localUri = await window.SochStorage.getLocalFileUri('videos', fileName);
               
@@ -288,6 +516,8 @@ window.SochMedia = {
                 product.video = this.convertVideoUrlForMobile(localUri);
                 console.log(`🔄 Replaced product video URL: ${product.style_code}`);
                 replacementCount++;
+              } else {
+                console.log(`⚠️ Local file not found for product video: ${product.style_code}, keeping remote URL`);
               }
             }
           }
