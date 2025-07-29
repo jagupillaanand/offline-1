@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">soch-downloader</string>
+    <string name="title_activity_main">soch-downloader</string>
+    <string name="package_name">com.sochapp.downloader</string>
+    <string name="custom_url_scheme">com.sochapp.downloader</string>
+</resources>
