@@ -9,7 +9,6 @@
  * 
  * Dependencies: config.js (must be loaded first)
  */
-
 window.SochNetwork = {
   
   // Global state variables
@@ -65,8 +64,8 @@ window.SochNetwork = {
           this.isOnline = testResponse.ok;
           console.log("🌐 API connectivity test:", this.isOnline ? "Success" : "Failed");
         } catch (err) {
-          console.log("⚠️ API test failed, but keeping online status based on device:", err.message);
-          // Don't change isOnline - trust the device's network status
+          console.log("⚠️ API test failed - treating as offline:", err.message);
+          this.isOnline = false; // FIXED: If API fails, we're effectively offline
         }
       }
       
@@ -74,13 +73,12 @@ window.SochNetwork = {
       return this.isOnline;
     } catch (err) {
       console.error("❌ Network check failed completely:", err);
-      // Default to online if we can't determine (better user experience)
-      this.isOnline = true;
-      console.log("🌐 Defaulting to online due to check failure");
-      return true;
+      // FIXED: Default to offline if we can't determine (prevents false positive)
+      this.isOnline = false;
+      console.log("🌐 Defaulting to offline due to check failure");
+      return false;
     }
   },
-
   /**
    * MAKE API CALL
    * Makes authenticated requests to the Supabase API with proper headers.
@@ -123,7 +121,6 @@ window.SochNetwork = {
       throw new Error(`API request failed: ${err.message}`);
     }
   },
-
   /**
    * UPDATE NETWORK STATUS IN UI
    * Updates the visual network status indicator in the user interface.
@@ -148,7 +145,6 @@ window.SochNetwork = {
       console.warn("⚠️ Network status element not found in UI");
     }
   },
-
   /**
    * TEST API ENDPOINT
    * Tests if a specific API endpoint is reachable and returns valid data.
@@ -167,6 +163,5 @@ window.SochNetwork = {
     }
   }
 };
-
 // Log successful module loading
 console.log("✅ Network module loaded");
