@@ -1,5 +1,5 @@
 /**
-* MEDIA.JS - Media File Management Module with Complete Video Fix
+* MEDIA.JS - Media File Management Module
 * 
 * This file handles all media-related operations including:
 * - Downloading images and videos from remote URLs
@@ -7,8 +7,7 @@
 * - Duplicate prevention for same URLs
 * - URL replacement (remote to local paths)
 * - Media file organization and cleanup
-* - Multiple Blob URL creation methods for iframe video access
-* - In-app logging display
+* - Blob URL creation for offline iframe video access
 * 
 * Dependencies: config.js, storage.js (must be loaded first)
 */
@@ -17,155 +16,56 @@ window.SochMedia = {
  // Store active blob URLs for cleanup
  activeBlobUrls: new Set(),
  
- // In-app logging system
- logContainer: null,
- logs: [],
- 
- /**
-  * INITIALIZE IN-APP LOGGING SYSTEM
-  */
- initializeLogging: function() {
-   // Create floating log container
-   const logContainer = document.createElement('div');
-   logContainer.id = 'inAppLogger';
-   logContainer.style.cssText = `
-     position: fixed;
-     top: 10px;
-     right: 10px;
-     width: 350px;
-     max-height: 400px;
-     background: rgba(0, 0, 0, 0.95);
-     color: #00ff00;
-     font-family: monospace;
-     font-size: 10px;
-     padding: 10px;
-     border-radius: 8px;
-     overflow-y: auto;
-     z-index: 99999;
-     border: 2px solid #00ff00;
-     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
-   `;
-   
-   logContainer.innerHTML = `
-     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; color: #ffff00; font-weight: bold;">
-       🎥 VIDEO DEBUG LOGS
-       <div>
-         <button onclick="window.SochMedia.clearLogs()" style="background: #cc4400; color: white; border: none; padding: 2px 6px; margin-left: 5px; border-radius: 3px; font-size: 9px;">Clear</button>
-         <button onclick="window.SochMedia.copyLogs()" style="background: #0066cc; color: white; border: none; padding: 2px 6px; margin-left: 5px; border-radius: 3px; font-size: 9px;">Copy</button>
-         <button onclick="this.parentElement.parentElement.parentElement.style.display='none'" style="background: #666; color: white; border: none; padding: 2px 6px; margin-left: 5px; border-radius: 3px; font-size: 9px;">Hide</button>
-       </div>
-     </div>
-     <div id="logContent" style="font-size: 9px; line-height: 1.3; max-height: 350px; overflow-y: auto;"></div>
-   `;
-   
-   document.body.appendChild(logContainer);
-   this.logContainer = logContainer;
-   
-   this.addLog('📱 In-app logging initialized', 'success');
- },
- 
- /**
-  * ADD LOG ENTRY TO IN-APP DISPLAY
-  */
- addLog: function(message, type = 'info') {
-   if (!this.logContainer) {
-     this.initializeLogging();
-   }
-   
-   const colors = {
-     info: '#00ff00',
-     warning: '#ffaa00',
-     error: '#ff4444',
-     success: '#44ff44',
-     debug: '#00aaff'
-   };
-   
-   const timestamp = new Date().toLocaleTimeString();
-   const logEntry = `[${timestamp}] ${message}`;
-   
-   // Store in array
-   this.logs.push(logEntry);
-   
-   // Add to display
-   const logContent = document.getElementById('logContent');
-   if (logContent) {
-     const logDiv = document.createElement('div');
-     logDiv.style.color = colors[type] || colors.info;
-     logDiv.style.marginBottom = '2px';
-     logDiv.innerHTML = logEntry;
-     logContent.appendChild(logDiv);
-     
-     // Auto-scroll to bottom
-     logContent.scrollTop = logContent.scrollHeight;
-     
-     // Limit logs to prevent memory issues
-     while (logContent.children.length > 100) {
-       logContent.removeChild(logContent.firstChild);
-       this.logs.shift();
-     }
-   }
-   
-   // Also log to console
-   console.log(`[MEDIA] ${message}`);
- },
- 
- /**
-  * CLEAR LOGS
-  */
- clearLogs: function() {
-   this.logs = [];
-   const logContent = document.getElementById('logContent');
-   if (logContent) {
-     logContent.innerHTML = '';
-   }
-   this.addLog('🗑️ Logs cleared', 'info');
- },
- 
- /**
-  * COPY LOGS TO CLIPBOARD
-  */
- copyLogs: function() {
-   const logText = this.logs.join('\n');
-   if (navigator.clipboard) {
-     navigator.clipboard.writeText(logText).then(() => {
-       this.addLog('📋 Logs copied to clipboard', 'success');
-     });
-   } else {
-     this.addLog('❌ Clipboard not available', 'error');
-   }
- },
- 
  /**
   * CONVERT DROPBOX URL TO DIRECT DOWNLOAD
+  * Dropbox URLs need special handling to work as direct download links.
+  * Converts sharing URLs to direct download URLs by adding dl=1 parameter.
+  * 
+  * @param {string} url - Original Dropbox URL
+  * @returns {string} - Direct download URL
   */
  convertDropboxUrl: function(url) {
    if (!url.includes('dropbox.com')) {
-     return url;
+     return url; // Not a Dropbox URL, return as-is
    }
    
    try {
+     // Remove existing dl parameter if present
      let cleanUrl = url.replace(/[?&]dl=[01]/, '');
+     
+     // Add direct download parameter
      const separator = cleanUrl.includes('?') ? '&' : '?';
      const directUrl = cleanUrl + separator + 'dl=1';
      
-     this.addLog(`📦 Converted Dropbox URL`, 'debug');
+     console.log("📦 Converted Dropbox URL:", url, "→", directUrl);
      return directUrl;
    } catch (err) {
-     this.addLog(`❌ Error converting Dropbox URL: ${err.message}`, 'error');
-     return url;
+     console.error("❌ Error converting Dropbox URL:", err);
+     return url; // Return original if conversion fails
    }
  },
  
  /**
   * SHOW PROGRESS BAR
+  * Displays a visual progress bar in the UI during file downloads.
+  * Updates both console logs and user interface with download progress.
+  * 
+  * @param {number} current - Current number of files downloaded
+  * @param {number} total - Total number of files to download
+  * @param {string} message - Progress message to display
   */
  showProgressBar: function(current, total, message) {
+   // Calculate percentage completed
    const percentage = Math.round((current / total) * 100);
+   
+   // Create visual progress bar using Unicode characters
    const progressBar = '█'.repeat(Math.floor(percentage / 5)) + '░'.repeat(20 - Math.floor(percentage / 5));
    
-   this.addLog(`📊 ${message} ${current}/${total} (${percentage}%)`, 'info');
-   this.addLog(`[${progressBar}]`, 'debug');
+   // Log to console for debugging
+   console.log(`📊 ${message} ${current}/${total} (${percentage}%)`);
+   console.log(`[${progressBar}]`);
    
+   // Update UI with visual progress bar
    const statusEl = document.getElementById('status');
    if (statusEl) {
      statusEl.innerHTML = `
@@ -182,16 +82,25 @@ window.SochMedia = {
  
  /**
   * IMPROVED FILENAME EXTRACTION FOR DROPBOX
+  * Generates better filenames specifically for Dropbox URLs.
+  * Handles the new Dropbox URL format and ensures unique filenames.
+  * 
+  * @param {string} url - The URL to extract filename from
+  * @param {string} prefix - Prefix for the filename (e.g., style code)
+  * @returns {string} - A safe, unique filename
   */
  getFileNameFromUrl: function(url, prefix = "") {
    try {
+     // For Dropbox URLs, extract the file ID from the path
      if (url.includes('dropbox.com')) {
+       // New Dropbox URL format: /scl/fi/FILE_ID/FILENAME.ext
        const sclMatch = url.match(/\/scl\/fi\/([^\/]+)\/([^\/\?]+)/);
        if (sclMatch) {
          const fileId = sclMatch[1];
          const originalName = sclMatch[2];
          
-         let extension = '.mp4';
+         // Extract extension from original filename or URL
+         let extension = '.mp4'; // Default for videos
          const extMatch = originalName.match(/\.([a-zA-Z0-9]+)$/);
          if (extMatch) {
            extension = '.' + extMatch[1].toLowerCase();
@@ -201,54 +110,67 @@ window.SochMedia = {
            extension = '.png';
          }
          
+         // Create filename: prefix + first 8 chars of file ID + extension
          const shortFileId = fileId.substring(0, 8);
          const fileName = prefix + shortFileId + extension;
          
-         this.addLog(`📝 Generated filename: ${fileName}`, 'debug');
+         console.log(`📝 Generated filename for Dropbox: ${fileName}`);
          return fileName;
        }
        
+       // Fallback for old Dropbox URL format
        const oldMatch = url.match(/\/([^\/\?]+)\.(mp4|mov|avi|mkv|jpg|jpeg|png|gif)/i);
        if (oldMatch) {
          return prefix + oldMatch[1] + '.' + oldMatch[2].toLowerCase();
        }
        
+       // Final fallback for Dropbox
        const urlHash = btoa(url).substring(0, 8).replace(/[\/\+]/g, '');
        return prefix + urlHash + '.mp4';
      }
      
+     // Handle regular URLs (non-Dropbox)
      const urlParts = url.split('/');
      let fileName = urlParts[urlParts.length - 1];
-     fileName = fileName.split('?')[0];
+     fileName = fileName.split('?')[0]; // Remove query parameters
      
      if (fileName && fileName.includes('.')) {
        const urlHash = btoa(url).substring(0, 8).replace(/[\/\+]/g, '');
        return prefix + urlHash + '_' + fileName;
      }
      
+     // Final fallback: generate filename from URL with appropriate extension
      const urlHash = btoa(url).substring(0, 8).replace(/[\/\+]/g, '');
      const extension = url.includes('.mp4') ? '.mp4' : 
                       url.includes('.jpg') ? '.jpg' : 
                       url.includes('.png') ? '.png' : '.jpg';
      return prefix + urlHash + extension;
    } catch (err) {
-     this.addLog(`❌ Error extracting filename: ${err.message}`, 'error');
+     console.error("❌ Error extracting filename from URL:", err);
+     // Emergency fallback using timestamp
      return prefix + Date.now() + '.jpg';
    }
  },
  
  /**
   * EXTRACT UNIQUE MEDIA FILES FROM JSON
+  * Analyzes the JSON data to create a map of unique media files to download.
+  * FIXED: Better handling of identical URLs and improved Dropbox support.
+  * 
+  * @param {Object} jsonData - The collection JSON data
+  * @returns {Map} - Map of unique URLs to file information
   */
  extractUniqueMediaFiles: function(jsonData) {
-   const urlToFileMap = new Map();
+   const urlToFileMap = new Map(); // Track unique URLs
    const collections = jsonData.collections;
    
-   this.addLog("🔍 Analyzing JSON data for media files...", 'info');
+   console.log("🔍 Analyzing JSON data for media files...");
    
+   // Iterate through each collection
    Object.keys(collections).forEach(collectionKey => {
      const collection = collections[collectionKey];
      
+     // Process collection banner image
      if (collection.collection_image_url && !urlToFileMap.has(collection.collection_image_url)) {
        const fileName = this.getFileNameFromUrl(
          collection.collection_image_url, 
@@ -261,14 +183,16 @@ window.SochMedia = {
          folder: 'images',
          type: 'collection_image',
          collectionKey,
-         directUrl
+         directUrl // Store the direct download URL
        });
-       this.addLog(`📷 Found collection image: ${collectionKey}`, 'debug');
+       console.log(`📷 Found collection image: ${collectionKey}`);
      }
      
+     // Process product media
      if (collection.products && Array.isArray(collection.products)) {
        collection.products.forEach((product, index) => {
          
+         // Process product image (avoid duplicates)
          if (product.image_url && !urlToFileMap.has(product.image_url)) {
            const fileName = this.getFileNameFromUrl(
              product.image_url, 
@@ -283,9 +207,10 @@ window.SochMedia = {
              styleCode: product.style_code,
              directUrl
            });
-           this.addLog(`📷 Found product image: ${product.style_code}`, 'debug');
+           console.log(`📷 Found product image: ${product.style_code}`);
          }
          
+         // Process product video (avoid duplicates)
          if (product.video && !urlToFileMap.has(product.video)) {
            const fileName = this.getFileNameFromUrl(
              product.video, 
@@ -300,37 +225,47 @@ window.SochMedia = {
              styleCode: product.style_code,
              directUrl
            });
-           this.addLog(`🎥 Found product video: ${product.style_code}`, 'debug');
+           console.log(`🎥 Found product video: ${product.style_code}`);
          }
        });
      }
    });
    
+   console.log(`📊 Found ${urlToFileMap.size} unique media files to download`);
+   
+   // Log breakdown by type
    const imageCount = Array.from(urlToFileMap.values()).filter(f => f.folder === 'images').length;
    const videoCount = Array.from(urlToFileMap.values()).filter(f => f.folder === 'videos').length;
-   this.addLog(`📊 Found ${urlToFileMap.size} unique media files - Images: ${imageCount}, Videos: ${videoCount}`, 'success');
+   console.log(`   - Images: ${imageCount}`);
+   console.log(`   - Videos: ${videoCount}`);
    
    return urlToFileMap;
  },
  
  /**
   * CLEANUP UNUSED FILES
+  * Removes files from local storage that are no longer referenced in the current JSON.
+  * This prevents storage bloat when content is updated and old files are no longer needed.
+  * 
+  * @param {Object} jsonData - Current JSON data with active file references
   */
  cleanupUnusedFiles: async function(jsonData) {
    const config = window.SochConfig;
    
+   // Skip cleanup in browser mode
    if (!config.isCapacitor) {
-     this.addLog("📱 Browser mode - skipping file cleanup", 'debug');
+     console.log("📱 Browser mode - skipping file cleanup");
      return;
    }
-   
    try {
-     this.addLog("🧹 Starting cleanup of unused files...", 'info');
+     console.log("🧹 Starting cleanup of unused files...");
      
+     // Get current active media files from JSON
      const activeUrls = this.extractUniqueMediaFiles(jsonData);
      const activeImageFiles = new Set();
      const activeVideoFiles = new Set();
      
+     // Build sets of currently needed filenames
      for (const [url, fileInfo] of activeUrls) {
        if (fileInfo.folder === 'images') {
          activeImageFiles.add(fileInfo.fileName);
@@ -339,13 +274,14 @@ window.SochMedia = {
        }
      }
      
-     this.addLog(`📊 Active files - Images: ${activeImageFiles.size}, Videos: ${activeVideoFiles.size}`, 'debug');
+     console.log(`📊 Active files - Images: ${activeImageFiles.size}, Videos: ${activeVideoFiles.size}`);
      
      const { Filesystem } = config.getPlugins();
      let deletedCount = 0;
      
      // Clean up images folder
      try {
+       console.log("🧹 Cleaning images folder...");
        const imageDir = await Filesystem.readdir({
          path: `${config.APP_FOLDER}/images`,
          directory: 'DOCUMENTS'
@@ -358,19 +294,20 @@ window.SochMedia = {
                path: `${config.APP_FOLDER}/images/${file.name}`,
                directory: 'DOCUMENTS'
              });
-             this.addLog(`🗑️ Deleted unused image: ${file.name}`, 'debug');
+             console.log(`🗑️ Deleted unused image: ${file.name}`);
              deletedCount++;
            } catch (deleteErr) {
-             this.addLog(`❌ Failed to delete image ${file.name}: ${deleteErr.message}`, 'error');
+             console.error(`❌ Failed to delete image ${file.name}:`, deleteErr);
            }
          }
        }
      } catch (err) {
-       this.addLog("ℹ️ No images folder found or already empty", 'debug');
+       console.log("ℹ️ No images folder found or already empty");
      }
      
      // Clean up videos folder
      try {
+       console.log("🧹 Cleaning videos folder...");
        const videoDir = await Filesystem.readdir({
          path: `${config.APP_FOLDER}/videos`,
          directory: 'DOCUMENTS'
@@ -383,299 +320,168 @@ window.SochMedia = {
                path: `${config.APP_FOLDER}/videos/${file.name}`,
                directory: 'DOCUMENTS'
              });
-             this.addLog(`🗑️ Deleted unused video: ${file.name}`, 'debug');
+             console.log(`🗑️ Deleted unused video: ${file.name}`);
              deletedCount++;
            } catch (deleteErr) {
-             this.addLog(`❌ Failed to delete video ${file.name}: ${deleteErr.message}`, 'error');
+             console.error(`❌ Failed to delete video ${file.name}:`, deleteErr);
            }
          }
        }
      } catch (err) {
-       this.addLog("ℹ️ No videos folder found or already empty", 'debug');
+       console.log("ℹ️ No videos folder found or already empty");
      }
      
-     this.addLog(`✅ Cleanup completed - ${deletedCount} unused files removed`, 'success');
+     console.log(`✅ Cleanup completed - ${deletedCount} unused files removed`);
      
    } catch (err) {
-     this.addLog(`❌ File cleanup process failed: ${err.message}`, 'error');
+     console.error("❌ File cleanup process failed:", err);
+     // Don't throw error - cleanup failure shouldn't stop the app
    }
  },
  
  /**
   * DOWNLOAD ALL MEDIA FILES
+  * Downloads all unique media files from the JSON data with progress tracking.
+  * FIXED: Uses direct Dropbox URLs and better error handling.
+  * 
+  * @param {Object} jsonData - The collection JSON data containing media URLs
+  * @returns {Promise<void>}
   */
  downloadMediaFiles: async function(jsonData) {
    const config = window.SochConfig;
    
+   // Skip downloads in browser mode
    if (!config.isCapacitor) {
-     this.addLog("📱 Browser mode - skipping actual media downloads", 'debug');
+     console.log("📱 Browser mode - skipping actual media downloads");
      return;
    }
-   
    try {
-     this.addLog("📥 Starting media download process...", 'info');
+     console.log("📥 Starting media download process...");
      
+     // Step 1: Extract unique media files to prevent duplicates
      const urlToFileMap = this.extractUniqueMediaFiles(jsonData);
      const totalFiles = urlToFileMap.size;
      let downloadCount = 0;
      let skippedCount = 0;
      let errorCount = 0;
      
-     this.addLog(`📊 Total unique media files to process: ${totalFiles}`, 'info');
+     console.log(`📊 Total unique media files to process: ${totalFiles}`);
      
+     // Step 2: Download each unique file with progress updates
      for (const [originalUrl, fileInfo] of urlToFileMap) {
        try {
+         // Show current progress
          this.showProgressBar(downloadCount, totalFiles, "Downloading media files");
          
+         // Use the direct download URL for Dropbox files
          const downloadUrl = fileInfo.directUrl || originalUrl;
-         this.addLog(`⬇️ Downloading: ${fileInfo.fileName}`, 'debug');
+         console.log(`⬇️ Downloading: ${fileInfo.fileName} from ${downloadUrl}`);
          
+         // Attempt to download the file (will skip if already exists)
          const result = await window.SochStorage.downloadFile(
-           downloadUrl,
+           downloadUrl, // Use direct URL instead of original
            `${config.APP_FOLDER}/${fileInfo.folder}`, 
            fileInfo.fileName
          );
          
          if (result === null) {
-           skippedCount++;
-           this.addLog(`⏭️ Skipped: ${fileInfo.fileName}`, 'debug');
+           skippedCount++; // File was skipped (already exists or duplicate)
+           console.log(`⏭️ Skipped: ${fileInfo.fileName}`);
          } else {
-           this.addLog(`✅ Downloaded: ${fileInfo.fileName}`, 'success');
+           console.log(`✅ Downloaded: ${fileInfo.fileName}`);
          }
          
          downloadCount++;
        } catch (err) {
-         this.addLog(`❌ Failed to download ${fileInfo.fileName}: ${err.message}`, 'error');
+         console.error(`❌ Failed to download ${fileInfo.fileName}:`, err);
          errorCount++;
-         downloadCount++;
+         downloadCount++; // Still increment to keep progress accurate
        }
      }
      
+     // Step 3: Show completion status
      this.showProgressBar(totalFiles, totalFiles, "Download completed");
-     this.addLog(`✅ Media download completed: ${totalFiles} processed, ${skippedCount} skipped, ${totalFiles - skippedCount - errorCount} downloaded, ${errorCount} errors`, 'success');
+     console.log(`✅ Media download process completed:`);
+     console.log(`   - Total files processed: ${totalFiles}`);
+     console.log(`   - Files skipped (already existed): ${skippedCount}`);
+     console.log(`   - New files downloaded: ${totalFiles - skippedCount - errorCount}`);
+     console.log(`   - Download errors: ${errorCount}`);
      
      if (errorCount > 0) {
-       this.addLog(`⚠️ ${errorCount} files failed to download - app will use remote URLs for those`, 'warning');
+       console.warn(`⚠️ ${errorCount} files failed to download - app will use remote URLs for those`);
      }
      
+     // Step 4: Cleanup unused files after downloads
      await this.cleanupUnusedFiles(jsonData);
      
    } catch (err) {
-     this.addLog(`❌ Media download process failed: ${err.message}`, 'error');
+     console.error("❌ Media download process failed:", err);
      throw new Error(`Media download failed: ${err.message}`);
    }
  },
  
  /**
-  * CONVERT DATA URL TO BLOB URL FOR IFRAME COMPATIBILITY
-  * CRITICAL FIX: Data URLs don't work in iframe srcdoc, but Blob URLs do
-  */
- convertDataUrlToBlobUrl: async function(dataUrl) {
-   this.addLog("🔄 Converting Data URL to Blob URL for iframe...", 'info');
-   
-   try {
-     if (!dataUrl.startsWith('data:video/')) {
-       this.addLog("⚠️ Not a Data URL - returning as-is", 'warning');
-       return dataUrl;
-     }
-     
-     // Extract base64 data from Data URL
-     const [header, base64Data] = dataUrl.split(',');
-     if (!base64Data) {
-       throw new Error("Invalid Data URL format");
-     }
-     
-     // Convert base64 to binary
-     const binaryString = atob(base64Data);
-     const bytes = new Uint8Array(binaryString.length);
-     
-     for (let i = 0; i < binaryString.length; i++) {
-       bytes[i] = binaryString.charCodeAt(i);
-     }
-     
-     // Create Blob
-     const blob = new Blob([bytes], { type: 'video/mp4' });
-     const blobUrl = URL.createObjectURL(blob);
-     
-     // Store for cleanup
-     this.activeBlobUrls.add(blobUrl);
-     
-     this.addLog(`✅ Data URL converted to Blob URL: ${blobUrl}`, 'success');
-     this.addLog(`📊 Blob size: ${blob.size} bytes`, 'debug');
-     
-     return blobUrl;
-     
-   } catch (err) {
-     this.addLog(`❌ Data URL to Blob conversion failed: ${err.message}`, 'error');
-     this.addLog("⚠️ Falling back to original Data URL", 'warning');
-     return dataUrl;
-   }
- },
- 
- /**
-  * COMPLETE FIXED: CREATE BLOB URL FROM LOCAL VIDEO FILE
-  * Multiple fallback methods for maximum compatibility
+  * CREATE BLOB URL FROM LOCAL VIDEO FILE
+  * Reads a local video file and creates a Blob URL for iframe access.
+  * This solves the offline video issue by bypassing iframe security restrictions.
+  * 
+  * @param {string} localUri - The local file URI (file://....)
+  * @returns {Promise<string>} - Blob URL that works in iframes
   */
  createVideoBlobUrl: async function(localUri) {
    const config = window.SochConfig;
    
-   this.addLog("🎥 ===== BLOB URL CREATION STARTED =====", 'info');
-   this.addLog(`🎥 Input: ${localUri}`, 'debug');
-   
    if (!config.isCapacitor || !localUri.startsWith('file://')) {
-     this.addLog("🎥 Skipping Blob URL creation - not Capacitor or not file:// URL", 'warning');
      return localUri;
    }
    
    try {
+     console.log("🎥 Creating Blob URL for offline video access");
+     console.log(`🔄 Original file:// URL: ${localUri}`);
+     
      const { Filesystem } = config.getPlugins();
      
      // Extract filename from the file path
      const fileName = localUri.split('/').pop();
-     this.addLog(`🎥 Extracted filename: ${fileName}`, 'debug');
      
-     // METHOD 1: Try to read as ArrayBuffer directly (most reliable)
-     this.addLog("🎥 METHOD 1: Attempting to read file as ArrayBuffer...", 'debug');
-     
-     try {
-       const fileData = await Filesystem.readFile({
-         path: `${config.APP_FOLDER}/videos/${fileName}`,
-         directory: 'DOCUMENTS'
-         // No encoding specified - should return ArrayBuffer
-       });
-       
-       if (fileData.data instanceof ArrayBuffer) {
-         this.addLog(`🎥 ArrayBuffer received: ${fileData.data.byteLength} bytes`, 'debug');
-         
-         // Create Blob directly from ArrayBuffer
-         const blob = new Blob([fileData.data], { type: 'video/mp4' });
-         const blobUrl = URL.createObjectURL(blob);
-         
-         // Store for cleanup
-         this.activeBlobUrls.add(blobUrl);
-         
-         this.addLog(`🎥 Blob URL created from ArrayBuffer: ${blobUrl}`, 'success');
-         this.addLog(`🎥 Blob size: ${blob.size} bytes`, 'success');
-         
-         this.addLog("🎥 ===== BLOB URL CREATION SUCCESS (ArrayBuffer) =====", 'success');
-         return blobUrl;
-       }
-     } catch (arrayBufferErr) {
-       this.addLog(`⚠️ METHOD 1 failed: ${arrayBufferErr.message}`, 'warning');
-     }
-     
-     // METHOD 2: Base64 with fetch (avoids atob issues)
-     this.addLog("🎥 METHOD 2: Using base64 with fetch method...", 'info');
-     
+     // Read the video file as base64
      const fileData = await Filesystem.readFile({
        path: `${config.APP_FOLDER}/videos/${fileName}`,
        directory: 'DOCUMENTS',
        encoding: 'base64'
      });
      
-     const dataLength = fileData.data ? fileData.data.length : 0;
-     this.addLog(`🎥 Base64 data received: ${dataLength} characters`, 'debug');
-     
-     if (!fileData.data || dataLength === 0) {
-       throw new Error("File data is empty or invalid");
+     // Convert base64 to Blob
+     const byteCharacters = atob(fileData.data);
+     const byteNumbers = new Array(byteCharacters.length);
+     for (let i = 0; i < byteCharacters.length; i++) {
+       byteNumbers[i] = byteCharacters.charCodeAt(i);
      }
+     const byteArray = new Uint8Array(byteNumbers);
+     const blob = new Blob([byteArray], { type: 'video/mp4' });
      
-     // Clean base64 data more thoroughly
-     let cleanBase64 = fileData.data
-       .replace(/[\r\n\s]/g, '') // Remove whitespace
-       .replace(/[^A-Za-z0-9+/=]/g, ''); // Remove any non-base64 characters
+     // Create Blob URL
+     const blobUrl = URL.createObjectURL(blob);
      
-     // Add proper padding
-     while (cleanBase64.length % 4 !== 0) {
-       cleanBase64 += '=';
-     }
+     // Track for cleanup
+     this.activeBlobUrls.add(blobUrl);
      
-     this.addLog(`🎥 Cleaned base64 length: ${cleanBase64.length}`, 'debug');
-     
-     // Use fetch with data URL instead of atob() for better compatibility
-     try {
-       const dataUrl = `data:video/mp4;base64,${cleanBase64}`;
-       const response = await fetch(dataUrl);
-       const arrayBuffer = await response.arrayBuffer();
-       
-       // Create Blob from the fetched ArrayBuffer
-       const blob = new Blob([arrayBuffer], { type: 'video/mp4' });
-       const blobUrl = URL.createObjectURL(blob);
-       
-       // Store for cleanup
-       this.activeBlobUrls.add(blobUrl);
-       
-       this.addLog(`🎥 Blob URL created from fetch: ${blobUrl}`, 'success');
-       this.addLog(`🎥 Blob size: ${blob.size} bytes`, 'success');
-       
-       this.addLog("🎥 ===== BLOB URL CREATION SUCCESS (Fetch) =====", 'success');
-       return blobUrl;
-       
-     } catch (fetchErr) {
-       this.addLog(`❌ METHOD 2 failed: ${fetchErr.message}`, 'error');
-       
-       // METHOD 3: Chunked atob processing (last resort)
-       try {
-         this.addLog("🎥 METHOD 3: Trying chunked atob processing...", 'warning');
-         
-         // Process base64 in smaller chunks to avoid issues
-         const chunkSize = 1024 * 1024; // 1MB chunks
-         const chunks = [];
-         
-         for (let i = 0; i < cleanBase64.length; i += chunkSize) {
-           const chunk = cleanBase64.substring(i, i + chunkSize);
-           try {
-             const binaryChunk = atob(chunk);
-             chunks.push(binaryChunk);
-           } catch (chunkErr) {
-             this.addLog(`❌ Chunk ${Math.floor(i/chunkSize)} failed: ${chunkErr.message}`, 'error');
-             throw new Error(`Base64 chunk processing failed at position ${i}`);
-           }
-         }
-         
-         const binaryString = chunks.join('');
-         const bytes = new Uint8Array(binaryString.length);
-         
-         for (let i = 0; i < binaryString.length; i++) {
-           bytes[i] = binaryString.charCodeAt(i);
-         }
-         
-         // Create Blob and URL
-         const blob = new Blob([bytes], { type: 'video/mp4' });
-         const blobUrl = URL.createObjectURL(blob);
-         
-         // Store for cleanup
-         this.activeBlobUrls.add(blobUrl);
-         
-         this.addLog(`🎥 Blob URL created from chunked atob: ${blobUrl}`, 'success');
-         this.addLog(`🎥 Blob size: ${blob.size} bytes`, 'success');
-         
-         this.addLog("🎥 ===== BLOB URL CREATION SUCCESS (Chunked) =====", 'success');
-         return blobUrl;
-         
-       } catch (atobErr) {
-         this.addLog(`❌ METHOD 3 failed: ${atobErr.message}`, 'error');
-         throw new Error(`All Blob URL creation methods failed: ${atobErr.message}`);
-       }
-     }
+     console.log(`🔄 Created Blob URL: ${blobUrl}`);
+     return blobUrl;
      
    } catch (err) {
-     this.addLog("🎥 ===== BLOB URL CREATION FAILED =====", 'error');
-     this.addLog(`🎥 Error: ${err.message}`, 'error');
-     this.addLog(`🎥 Using capacitor:// URL as final fallback`, 'warning');
-     
-     // FINAL FALLBACK: Use capacitor:// URL which might work in iframe
-     const capacitorUrl = localUri.replace('file://', 'capacitor://localhost/_capacitor_file_');
-     this.addLog(`🎥 Final fallback URL: ${capacitorUrl}`, 'warning');
-     return capacitorUrl;
+     console.error("❌ Failed to create Blob URL for video:", err);
+     console.log("🔄 Falling back to original URL");
+     return localUri;
    }
  },
  
  /**
   * CLEANUP BLOB URLS
+  * Revokes active Blob URLs to free memory
   */
  cleanupBlobUrls: function() {
-   this.addLog(`🧹 Cleaning up ${this.activeBlobUrls.size} Blob URLs`, 'info');
+   console.log(`🧹 Cleaning up ${this.activeBlobUrls.size} Blob URLs`);
    
    for (const blobUrl of this.activeBlobUrls) {
      URL.revokeObjectURL(blobUrl);
@@ -685,55 +491,68 @@ window.SochMedia = {
  },
  
  /**
-  * CONVERT VIDEO URL FOR MOBILE PLAYBACK - BLOB URL SOLUTION
-  * Uses multiple methods for maximum compatibility
+  * CONVERT VIDEO URL FOR MOBILE PLAYBACK - FIXED FOR OFFLINE IFRAME ACCESS
+  * Creates Blob URLs for offline videos to work in iframes.
+  * This is the key function that solves the offline video issue.
+  * 
+  * @param {string} localUri - The local file URI
+  * @returns {Promise<string>} - Blob URL for iframe compatibility
   */
  convertVideoUrlForMobile: async function(localUri) {
    const config = window.SochConfig;
    
-   this.addLog("🎥 ===== VIDEO URL CONVERSION STARTED =====", 'info');
-   this.addLog(`🎥 Input: ${localUri}`, 'debug');
-   this.addLog(`🎥 Is Capacitor: ${config.isCapacitor}`, 'debug');
-   
    // Browser mode - no conversion needed
    if (!config.isCapacitor) {
-     this.addLog("🎥 Browser mode - no conversion needed", 'debug');
      return localUri;
    }
    
-   // Check if we have a local file URI
-   if (localUri && localUri.startsWith('file://')) {
-     this.addLog("🎥 Creating Blob URL for iframe compatibility", 'info');
-     const blobUrl = await this.createVideoBlobUrl(localUri);
-     this.addLog(`🎥 RESULT: ${blobUrl.substring(0, 50)}...`, 'success');
-     return blobUrl;
+   // Check if we're offline
+   const isOffline = !window.SochNetwork.isOnline;
+   
+   if (localUri && localUri.startsWith('file://') && isOffline) {
+     // Offline mode: Create Blob URL for iframe access
+     return await this.createVideoBlobUrl(localUri);
+   } else if (localUri && localUri.startsWith('file://')) {
+     // Online mode: Use capacitor URL
+     console.log("🎥 Converting to capacitor URL for online iframe access");
+     const capacitorUrl = localUri.replace('file://', 'capacitor://localhost/_capacitor_file_');
+     console.log(`🔄 Original: ${localUri}`);
+     console.log(`🔄 Converted: ${capacitorUrl}`);
+     return capacitorUrl;
    }
    
-   this.addLog("🎥 No conversion needed - returning original", 'debug');
    return localUri;
  },
  
  /**
   * REPLACE REMOTE URLS WITH LOCAL PATHS
+  * Processes the JSON data and replaces all remote URLs with local file paths.
+  * FIXED: Creates Blob URLs for offline video access in iframes.
+  * 
+  * @param {Object} jsonData - Original JSON data with remote URLs
+  * @returns {Object} - Modified JSON data with iframe-compatible local URIs
   */
  replaceUrlsWithLocalPaths: async function(jsonData) {
    const config = window.SochConfig;
    
+   // In browser mode, keep using remote URLs
    if (!config.isCapacitor) {
-     this.addLog("📱 Browser mode - keeping remote URLs", 'debug');
+     console.log("📱 Browser mode - keeping remote URLs");
      return jsonData;
    }
-   
    try {
-     this.addLog("🔄 Starting URL replacement process...", 'info');
+     console.log("🔄 Starting URL replacement process...");
      
+     // Create deep copy to avoid modifying original data
      const modifiedData = JSON.parse(JSON.stringify(jsonData));
      const collections = modifiedData.collections;
      let replacementCount = 0;
      
+     // Process each collection
      for (const collectionKey of Object.keys(collections)) {
        const collection = collections[collectionKey];
        
+       // Replace collection banner image URL
        if (collection.collection_image_url) {
          const fileName = this.getFileNameFromUrl(
            collection.collection_image_url, 
@@ -743,16 +562,18 @@ window.SochMedia = {
          
          if (localUri) {
            collection.collection_image_url = localUri;
-           this.addLog(`🔄 Replaced collection image URL: ${collectionKey}`, 'debug');
+           console.log(`🔄 Replaced collection image URL: ${collectionKey}`);
            replacementCount++;
          } else {
-           this.addLog(`⚠️ Local file not found for collection image: ${collectionKey}`, 'warning');
+           console.log(`⚠️ Local file not found for collection image: ${collectionKey}, keeping remote URL`);
          }
        }
        
+       // Replace product media URLs
        if (collection.products && Array.isArray(collection.products)) {
          for (const product of collection.products) {
            
+           // Replace product image URL
            if (product.image_url) {
              const fileName = this.getFileNameFromUrl(
                product.image_url, 
@@ -762,13 +583,14 @@ window.SochMedia = {
              
              if (localUri) {
                product.image_url = localUri;
-               this.addLog(`🔄 Replaced product image URL: ${product.style_code}`, 'debug');
+               console.log(`🔄 Replaced product image URL: ${product.style_code}`);
                replacementCount++;
              } else {
-               this.addLog(`⚠️ Local file not found for product image: ${product.style_code}`, 'warning');
+               console.log(`⚠️ Local file not found for product image: ${product.style_code}, keeping remote URL`);
              }
            }
            
+           // Replace product video URL with Blob URL for offline iframe access
            if (product.video) {
              const fileName = this.getFileNameFromUrl(
                product.video, 
@@ -777,35 +599,28 @@ window.SochMedia = {
              const localUri = await window.SochStorage.getLocalFileUri('videos', fileName);
              
              if (localUri) {
-               // CRITICAL FIX: Convert to Blob URL for iframe access
+               // FIXED: Create Blob URL for offline iframe access
                product.video = await this.convertVideoUrlForMobile(localUri);
-               this.addLog(`🔄 Replaced product video URL: ${product.style_code} -> ${product.video.substring(0, 50)}...`, 'success');
+               console.log(`🔄 Replaced product video URL: ${product.style_code}`);
                replacementCount++;
              } else {
-               this.addLog(`⚠️ Local file not found for product video: ${product.style_code}`, 'warning');
+               console.log(`⚠️ Local file not found for product video: ${product.style_code}, keeping remote URL`);
              }
            }
          }
        }
      }
      
-     this.addLog(`✅ URL replacement completed - ${replacementCount} URLs replaced`, 'success');
+     console.log(`✅ URL replacement completed - ${replacementCount} URLs replaced with local paths`);
      return modifiedData;
      
    } catch (err) {
-     this.addLog(`❌ Error during URL replacement: ${err.message}`, 'error');
-     this.addLog("⚠️ Falling back to original data with remote URLs", 'warning');
-     return jsonData;
+     console.error("❌ Error during URL replacement:", err);
+     console.log("⚠️ Falling back to original data with remote URLs");
+     return jsonData; // Return original data if replacement fails
    }
  }
 };
 
-// Initialize logging when module loads
-document.addEventListener('DOMContentLoaded', function() {
-  setTimeout(() => {
-    window.SochMedia.initializeLogging();
-  }, 1000);
-});
-
 // Log successful module loading
-console.log("✅ Media module loaded with complete multi-method Blob URL solution for offline iframe videos");
+console.log("✅ Media module loaded with Blob URL support for offline videos");
