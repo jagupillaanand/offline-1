@@ -1,5 +1,5 @@
 /**
-* MEDIA.JS - Media File Management Module with Data URL Solution
+* MEDIA.JS - Media File Management Module with Complete Video Fix
 * 
 * This file handles all media-related operations including:
 * - Downloading images and videos from remote URLs
@@ -7,14 +7,14 @@
 * - Duplicate prevention for same URLs
 * - URL replacement (remote to local paths)
 * - Media file organization and cleanup
-* - Data URL creation for offline iframe video access (instead of Blob URLs)
+* - Multiple Blob URL creation methods for iframe video access
 * - In-app logging display
 * 
 * Dependencies: config.js, storage.js (must be loaded first)
 */
 window.SochMedia = {
  
- // Store active blob URLs for cleanup (keeping for compatibility)
+ // Store active blob URLs for cleanup
  activeBlobUrls: new Set(),
  
  // In-app logging system
@@ -467,17 +467,63 @@ window.SochMedia = {
  },
  
  /**
-  * CREATE DATA URL FROM LOCAL VIDEO FILE - ALTERNATIVE TO BLOB URLS
-  * This should work better in iframes than Blob URLs
+  * CONVERT DATA URL TO BLOB URL FOR IFRAME COMPATIBILITY
+  * CRITICAL FIX: Data URLs don't work in iframe srcdoc, but Blob URLs do
   */
- createVideoDataUrl: async function(localUri) {
+ convertDataUrlToBlobUrl: async function(dataUrl) {
+   this.addLog("🔄 Converting Data URL to Blob URL for iframe...", 'info');
+   
+   try {
+     if (!dataUrl.startsWith('data:video/')) {
+       this.addLog("⚠️ Not a Data URL - returning as-is", 'warning');
+       return dataUrl;
+     }
+     
+     // Extract base64 data from Data URL
+     const [header, base64Data] = dataUrl.split(',');
+     if (!base64Data) {
+       throw new Error("Invalid Data URL format");
+     }
+     
+     // Convert base64 to binary
+     const binaryString = atob(base64Data);
+     const bytes = new Uint8Array(binaryString.length);
+     
+     for (let i = 0; i < binaryString.length; i++) {
+       bytes[i] = binaryString.charCodeAt(i);
+     }
+     
+     // Create Blob
+     const blob = new Blob([bytes], { type: 'video/mp4' });
+     const blobUrl = URL.createObjectURL(blob);
+     
+     // Store for cleanup
+     this.activeBlobUrls.add(blobUrl);
+     
+     this.addLog(`✅ Data URL converted to Blob URL: ${blobUrl}`, 'success');
+     this.addLog(`📊 Blob size: ${blob.size} bytes`, 'debug');
+     
+     return blobUrl;
+     
+   } catch (err) {
+     this.addLog(`❌ Data URL to Blob conversion failed: ${err.message}`, 'error');
+     this.addLog("⚠️ Falling back to original Data URL", 'warning');
+     return dataUrl;
+   }
+ },
+ 
+ /**
+  * COMPLETE FIXED: CREATE BLOB URL FROM LOCAL VIDEO FILE
+  * Multiple fallback methods for maximum compatibility
+  */
+ createVideoBlobUrl: async function(localUri) {
    const config = window.SochConfig;
    
-   this.addLog("🎥 ===== DATA URL CREATION STARTED =====", 'info');
+   this.addLog("🎥 ===== BLOB URL CREATION STARTED =====", 'info');
    this.addLog(`🎥 Input: ${localUri}`, 'debug');
    
    if (!config.isCapacitor || !localUri.startsWith('file://')) {
-     this.addLog("🎥 Skipping Data URL creation - not Capacitor or not file:// URL", 'warning');
+     this.addLog("🎥 Skipping Blob URL creation - not Capacitor or not file:// URL", 'warning');
      return localUri;
    }
    
@@ -488,8 +534,39 @@ window.SochMedia = {
      const fileName = localUri.split('/').pop();
      this.addLog(`🎥 Extracted filename: ${fileName}`, 'debug');
      
-     // Read the video file as base64
-     this.addLog("🎥 Reading file as base64 for Data URL...", 'debug');
+     // METHOD 1: Try to read as ArrayBuffer directly (most reliable)
+     this.addLog("🎥 METHOD 1: Attempting to read file as ArrayBuffer...", 'debug');
+     
+     try {
+       const fileData = await Filesystem.readFile({
+         path: `${config.APP_FOLDER}/videos/${fileName}`,
+         directory: 'DOCUMENTS'
+         // No encoding specified - should return ArrayBuffer
+       });
+       
+       if (fileData.data instanceof ArrayBuffer) {
+         this.addLog(`🎥 ArrayBuffer received: ${fileData.data.byteLength} bytes`, 'debug');
+         
+         // Create Blob directly from ArrayBuffer
+         const blob = new Blob([fileData.data], { type: 'video/mp4' });
+         const blobUrl = URL.createObjectURL(blob);
+         
+         // Store for cleanup
+         this.activeBlobUrls.add(blobUrl);
+         
+         this.addLog(`🎥 Blob URL created from ArrayBuffer: ${blobUrl}`, 'success');
+         this.addLog(`🎥 Blob size: ${blob.size} bytes`, 'success');
+         
+         this.addLog("🎥 ===== BLOB URL CREATION SUCCESS (ArrayBuffer) =====", 'success');
+         return blobUrl;
+       }
+     } catch (arrayBufferErr) {
+       this.addLog(`⚠️ METHOD 1 failed: ${arrayBufferErr.message}`, 'warning');
+     }
+     
+     // METHOD 2: Base64 with fetch (avoids atob issues)
+     this.addLog("🎥 METHOD 2: Using base64 with fetch method...", 'info');
+     
      const fileData = await Filesystem.readFile({
        path: `${config.APP_FOLDER}/videos/${fileName}`,
        directory: 'DOCUMENTS',
@@ -503,31 +580,99 @@ window.SochMedia = {
        throw new Error("File data is empty or invalid");
      }
      
-     // Clean the base64 data
-     let cleanBase64 = fileData.data.replace(/[^A-Za-z0-9+/=]/g, '');
-     while (cleanBase64.length % 4) {
+     // Clean base64 data more thoroughly
+     let cleanBase64 = fileData.data
+       .replace(/[\r\n\s]/g, '') // Remove whitespace
+       .replace(/[^A-Za-z0-9+/=]/g, ''); // Remove any non-base64 characters
+     
+     // Add proper padding
+     while (cleanBase64.length % 4 !== 0) {
        cleanBase64 += '=';
      }
      
      this.addLog(`🎥 Cleaned base64 length: ${cleanBase64.length}`, 'debug');
      
-     // Create Data URL directly from base64
-     const dataUrl = `data:video/mp4;base64,${cleanBase64}`;
-     this.addLog(`🎥 Data URL created: ${dataUrl.substring(0, 50)}...`, 'success');
-     
-     this.addLog("🎥 ===== DATA URL CREATION SUCCESS =====", 'success');
-     return dataUrl;
+     // Use fetch with data URL instead of atob() for better compatibility
+     try {
+       const dataUrl = `data:video/mp4;base64,${cleanBase64}`;
+       const response = await fetch(dataUrl);
+       const arrayBuffer = await response.arrayBuffer();
+       
+       // Create Blob from the fetched ArrayBuffer
+       const blob = new Blob([arrayBuffer], { type: 'video/mp4' });
+       const blobUrl = URL.createObjectURL(blob);
+       
+       // Store for cleanup
+       this.activeBlobUrls.add(blobUrl);
+       
+       this.addLog(`🎥 Blob URL created from fetch: ${blobUrl}`, 'success');
+       this.addLog(`🎥 Blob size: ${blob.size} bytes`, 'success');
+       
+       this.addLog("🎥 ===== BLOB URL CREATION SUCCESS (Fetch) =====", 'success');
+       return blobUrl;
+       
+     } catch (fetchErr) {
+       this.addLog(`❌ METHOD 2 failed: ${fetchErr.message}`, 'error');
+       
+       // METHOD 3: Chunked atob processing (last resort)
+       try {
+         this.addLog("🎥 METHOD 3: Trying chunked atob processing...", 'warning');
+         
+         // Process base64 in smaller chunks to avoid issues
+         const chunkSize = 1024 * 1024; // 1MB chunks
+         const chunks = [];
+         
+         for (let i = 0; i < cleanBase64.length; i += chunkSize) {
+           const chunk = cleanBase64.substring(i, i + chunkSize);
+           try {
+             const binaryChunk = atob(chunk);
+             chunks.push(binaryChunk);
+           } catch (chunkErr) {
+             this.addLog(`❌ Chunk ${Math.floor(i/chunkSize)} failed: ${chunkErr.message}`, 'error');
+             throw new Error(`Base64 chunk processing failed at position ${i}`);
+           }
+         }
+         
+         const binaryString = chunks.join('');
+         const bytes = new Uint8Array(binaryString.length);
+         
+         for (let i = 0; i < binaryString.length; i++) {
+           bytes[i] = binaryString.charCodeAt(i);
+         }
+         
+         // Create Blob and URL
+         const blob = new Blob([bytes], { type: 'video/mp4' });
+         const blobUrl = URL.createObjectURL(blob);
+         
+         // Store for cleanup
+         this.activeBlobUrls.add(blobUrl);
+         
+         this.addLog(`🎥 Blob URL created from chunked atob: ${blobUrl}`, 'success');
+         this.addLog(`🎥 Blob size: ${blob.size} bytes`, 'success');
+         
+         this.addLog("🎥 ===== BLOB URL CREATION SUCCESS (Chunked) =====", 'success');
+         return blobUrl;
+         
+       } catch (atobErr) {
+         this.addLog(`❌ METHOD 3 failed: ${atobErr.message}`, 'error');
+         throw new Error(`All Blob URL creation methods failed: ${atobErr.message}`);
+       }
+     }
      
    } catch (err) {
-     this.addLog("🎥 ===== DATA URL CREATION FAILED =====", 'error');
+     this.addLog("🎥 ===== BLOB URL CREATION FAILED =====", 'error');
      this.addLog(`🎥 Error: ${err.message}`, 'error');
-     this.addLog(`🎥 Falling back to original URL: ${localUri}`, 'warning');
-     return localUri;
+     this.addLog(`🎥 Using capacitor:// URL as final fallback`, 'warning');
+     
+     // FINAL FALLBACK: Use capacitor:// URL which might work in iframe
+     const capacitorUrl = localUri.replace('file://', 'capacitor://localhost/_capacitor_file_');
+     this.addLog(`🎥 Final fallback URL: ${capacitorUrl}`, 'warning');
+     return capacitorUrl;
    }
  },
  
  /**
-  * CLEANUP BLOB URLS (keeping for compatibility)
+  * CLEANUP BLOB URLS
   */
  cleanupBlobUrls: function() {
    this.addLog(`🧹 Cleaning up ${this.activeBlobUrls.size} Blob URLs`, 'info');
@@ -540,8 +685,8 @@ window.SochMedia = {
  },
  
  /**
-  * CONVERT VIDEO URL FOR MOBILE PLAYBACK - DATA URL SOLUTION
-  * Uses Data URLs instead of Blob URLs for better iframe compatibility
+  * CONVERT VIDEO URL FOR MOBILE PLAYBACK - BLOB URL SOLUTION
+  * Uses multiple methods for maximum compatibility
   */
  convertVideoUrlForMobile: async function(localUri) {
    const config = window.SochConfig;
@@ -549,7 +694,6 @@ window.SochMedia = {
    this.addLog("🎥 ===== VIDEO URL CONVERSION STARTED =====", 'info');
    this.addLog(`🎥 Input: ${localUri}`, 'debug');
    this.addLog(`🎥 Is Capacitor: ${config.isCapacitor}`, 'debug');
-   this.addLog(`🎥 Network status: ${window.SochNetwork.isOnline ? 'ONLINE' : 'OFFLINE'}`, 'debug');
    
    // Browser mode - no conversion needed
    if (!config.isCapacitor) {
@@ -559,22 +703,10 @@ window.SochMedia = {
    
    // Check if we have a local file URI
    if (localUri && localUri.startsWith('file://')) {
-     const isOffline = !window.SochNetwork.isOnline;
-     this.addLog(`🎥 Processing file:// URL, offline: ${isOffline}`, 'debug');
-     
-     if (isOffline) {
-       // OFFLINE: Use Data URLs for iframe compatibility
-       this.addLog("🎥 OFFLINE MODE: Creating Data URL for iframe access", 'info');
-       const dataUrl = await this.createVideoDataUrl(localUri);
-       this.addLog(`🎥 OFFLINE RESULT: ${dataUrl.substring(0, 50)}...`, 'success');
-       return dataUrl;
-     } else {
-       // ONLINE: Use Capacitor URLs
-       this.addLog("🎥 ONLINE MODE: Converting to Capacitor URL", 'info');
-       const capacitorUrl = localUri.replace('file://', 'capacitor://localhost/_capacitor_file_');
-       this.addLog(`🎥 ONLINE RESULT: ${capacitorUrl}`, 'success');
-       return capacitorUrl;
-     }
+     this.addLog("🎥 Creating Blob URL for iframe compatibility", 'info');
+     const blobUrl = await this.createVideoBlobUrl(localUri);
+     this.addLog(`🎥 RESULT: ${blobUrl.substring(0, 50)}...`, 'success');
+     return blobUrl;
    }
    
    this.addLog("🎥 No conversion needed - returning original", 'debug');
@@ -645,7 +777,7 @@ window.SochMedia = {
              const localUri = await window.SochStorage.getLocalFileUri('videos', fileName);
              
              if (localUri) {
-               // CRITICAL: Convert to Data URL for offline iframe access
+               // CRITICAL FIX: Convert to Blob URL for iframe access
                product.video = await this.convertVideoUrlForMobile(localUri);
                this.addLog(`🔄 Replaced product video URL: ${product.style_code} -> ${product.video.substring(0, 50)}...`, 'success');
                replacementCount++;
@@ -676,4 +808,4 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // Log successful module loading
-console.log("✅ Media module loaded with Data URL solution for offline videos");
+console.log("✅ Media module loaded with complete multi-method Blob URL solution for offline iframe videos");

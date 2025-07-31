@@ -1,9 +1,17 @@
 /**
- * FLIPBOOK.JS - Flipbook Management Module with Comprehensive Video Debugging
+ * FLIPBOOK.JS - Flipbook Management Module with Correct Flow
  * 
- * This version includes extensive debugging to track video URL processing
+ * CORRECTED FLOW:
+ * 1. Always load from local storage first (online or offline)
+ * 2. Only check versions when online + app opens
+ * 3. If versions changed: download all content, then show from local storage
+ * 4. If versions unchanged: skip downloads, show from local storage immediately
  */
 window.SochFlipbook = {
+  
+  // Track if we've already checked versions this session
+  hasCheckedVersionsThisSession: false,
+  
   /**
    * CREATE ON-SCREEN DEBUG CONSOLE
    */
@@ -13,6 +21,7 @@ window.SochFlipbook = {
     if (existingConsole) {
       existingConsole.remove();
     }
+    
     // Create debug console overlay
     const debugConsole = document.createElement('div');
     debugConsole.id = 'videoDebugConsole';
@@ -34,7 +43,7 @@ window.SochFlipbook = {
     `;
     debugConsole.innerHTML = `
       <div style="color: #ffff00; font-weight: bold; margin-bottom: 5px;">
-        🎥 VIDEO DEBUG CONSOLE
+        🎥 FLIPBOOK DEBUG CONSOLE
         <button onclick="this.parentElement.parentElement.style.display='none'" 
                 style="float: right; background: red; color: white; border: none; padding: 2px 5px;">✕</button>
       </div>
@@ -43,6 +52,7 @@ window.SochFlipbook = {
     document.body.appendChild(debugConsole);
     return debugConsole;
   },
+  
   /**
    * LOG TO ON-SCREEN CONSOLE
    */
@@ -63,44 +73,168 @@ window.SochFlipbook = {
       
       debugContent.appendChild(logEntry);
       debugContent.scrollTop = debugContent.scrollHeight;
+      
+      // Limit logs to prevent memory issues
+      while (debugContent.children.length > 100) {
+        debugContent.removeChild(debugContent.firstChild);
+      }
     }
     // Also log to regular console
-    console.log(`[FLIPBOOK DEBUG] ${message}`);
+    console.log(`[FLIPBOOK] ${message}`);
   },
+  
   /**
-   * CHECK IF HTML FILE EXISTS LOCALLY
+   * CHECK IF WE HAVE LOCAL DATA AVAILABLE
    */
-  checkLocalHtmlExists: async function() {
+  checkLocalDataExists: async function() {
     const config = window.SochConfig;
     
-    if (!config.isCapacitor) return false;
+    if (!config.isCapacitor) {
+      this.logToScreen("🌐 Browser mode - no local storage check needed", 'info');
+      return false;
+    }
     
     try {
-      const { Filesystem } = config.getPlugins();
+      // Check if we have local JSON data
+      const localJsonData = await window.SochStorage.readLocalJsonData();
+      if (!localJsonData) {
+        this.logToScreen("❌ No local JSON data found", 'warning');
+        return false;
+      }
       
+      // Check if we have local HTML file
+      const { Filesystem } = config.getPlugins();
       await Filesystem.readFile({
         path: `${config.APP_FOLDER}/html/flipbook.html`,
         directory: 'DOCUMENTS',
         encoding: 'utf8'
       });
       
-      this.logToScreen("✅ Local HTML file found in cache", 'success');
+      this.logToScreen("✅ Local data exists - JSON and HTML files found", 'success');
       return true;
+      
     } catch (err) {
-      this.logToScreen("ℹ️ Local HTML file not found - will need to download", 'warning');
+      this.logToScreen(`❌ Local data check failed: ${err.message}`, 'error');
       return false;
     }
   },
+  
+  /**
+   * CHECK IF VERSIONS HAVE CHANGED (ONLY WHEN ONLINE)
+   */
+  checkIfVersionsChanged: async function() {
+    try {
+      this.logToScreen("🔍 Checking if versions have changed...", 'info');
+      
+      // Get current versions from API
+      const [htmlUrlData, jsonData] = await Promise.all([
+        window.SochNetwork.makeApiCall('html_url'),
+        window.SochNetwork.makeApiCall('json')
+      ]);
+      
+      const currentHtmlUrl = htmlUrlData.html_url;
+      const currentJsonVersion = JSON.stringify(jsonData.json); // Simple version check
+      
+      // Get stored versions
+      const config = window.SochConfig;
+      let storedHtmlUrl = '';
+      let storedJsonVersion = '';
+      
+      if (config.isCapacitor) {
+        try {
+          const { Preferences } = config.getPlugins();
+          
+          const htmlResult = await Preferences.get({ key: 'stored_html_url' });
+          const jsonResult = await Preferences.get({ key: 'stored_json_version' });
+          
+          storedHtmlUrl = htmlResult.value || '';
+          storedJsonVersion = jsonResult.value || '';
+        } catch (err) {
+          this.logToScreen(`⚠️ Could not read stored versions: ${err.message}`, 'warning');
+        }
+      }
+      
+      // Compare versions
+      const htmlChanged = currentHtmlUrl !== storedHtmlUrl;
+      const jsonChanged = currentJsonVersion !== storedJsonVersion;
+      
+      this.logToScreen(`📊 Version check results:`, 'info');
+      this.logToScreen(`   HTML changed: ${htmlChanged}`, htmlChanged ? 'warning' : 'success');
+      this.logToScreen(`   JSON changed: ${jsonChanged}`, jsonChanged ? 'warning' : 'success');
+      
+      return {
+        changed: htmlChanged || jsonChanged,
+        htmlChanged,
+        jsonChanged,
+        currentHtmlUrl,
+        currentJsonVersion,
+        apiData: { htmlUrlData, jsonData }
+      };
+      
+    } catch (err) {
+      this.logToScreen(`❌ Version check failed: ${err.message}`, 'error');
+      throw new Error(`Version check failed: ${err.message}`);
+    }
+  },
+  
+  /**
+   * DOWNLOAD AND UPDATE ALL CONTENT
+   */
+  downloadAndUpdateContent: async function(apiData) {
+    try {
+      this.logToScreen("📥 Starting content download and update...", 'info');
+      window.SochUI.updateProgress("Downloading latest content...");
+      
+      const { htmlUrlData, jsonData } = apiData;
+      const config = window.SochConfig;
+      
+      // Step 1: Download and save HTML
+      this.logToScreen("📄 Downloading HTML file...", 'info');
+      await this.downloadAndSaveHtml(htmlUrlData.html_url);
+      
+      // Step 2: Save JSON data
+      this.logToScreen("💾 Saving JSON data...", 'info');
+      await window.SochStorage.saveJsonData(jsonData.json);
+      
+      // Step 3: Download all media files
+      this.logToScreen("🎬 Downloading media files...", 'info');
+      window.SochUI.updateProgress("Downloading images and videos...");
+      await window.SochMedia.downloadMediaFiles(jsonData.json);
+      
+      // Step 4: Store version information
+      if (config.isCapacitor) {
+        try {
+          const { Preferences } = config.getPlugins();
+          
+          await Preferences.set({
+            key: 'stored_html_url',
+            value: htmlUrlData.html_url
+          });
+          
+          await Preferences.set({
+            key: 'stored_json_version',
+            value: JSON.stringify(jsonData.json)
+          });
+          
+          this.logToScreen("✅ Version information stored", 'success');
+        } catch (err) {
+          this.logToScreen(`⚠️ Could not store version info: ${err.message}`, 'warning');
+        }
+      }
+      
+      this.logToScreen("✅ Content download and update completed", 'success');
+      
+    } catch (err) {
+      this.logToScreen(`❌ Content download failed: ${err.message}`, 'error');
+      throw new Error(`Content download failed: ${err.message}`);
+    }
+  },
+  
   /**
    * DOWNLOAD AND SAVE HTML FILE
    */
-  downloadAndSaveHtml: async function() {
+  downloadAndSaveHtml: async function(htmlUrl) {
     try {
-      this.logToScreen("📥 Downloading latest flipbook HTML...", 'info');
-      
-      const htmlUrlData = await window.SochNetwork.makeApiCall('html_url');
-      const htmlUrl = htmlUrlData.html_url;
-      
       this.logToScreen(`🔗 HTML URL: ${htmlUrl}`, 'info');
       
       const config = window.SochConfig;
@@ -112,18 +246,18 @@ window.SochFlipbook = {
           directory: 'DOCUMENTS',
           path: `${config.APP_FOLDER}/html/flipbook.html`,
         });
+        
         await FileTransfer.downloadFile({
           url: htmlUrl,
           path: fileUri.uri,
         });
         
-        this.logToScreen("✅ HTML file downloaded and cached locally", 'success');
-        return true;
+        this.logToScreen("✅ HTML file downloaded and saved", 'success');
       } else {
+        // Browser mode - fetch and return content
         const response = await fetch(htmlUrl);
         const htmlContent = await response.text();
-        
-        this.logToScreen("✅ HTML content fetched for browser use", 'success');
+        this.logToScreen("✅ HTML content fetched (browser mode)", 'success');
         return htmlContent;
       }
     } catch (err) {
@@ -131,454 +265,151 @@ window.SochFlipbook = {
       throw new Error(`HTML download failed: ${err.message}`);
     }
   },
+  
   /**
-   * DEBUG VIDEO FILES - CHECK WHAT'S ACTUALLY IN THE VIDEOS FOLDER
+   * LOAD FLIPBOOK FROM LOCAL STORAGE
    */
-  debugVideoFiles: async function() {
-    const config = window.SochConfig;
-    
-    if (!config.isCapacitor) {
-      this.logToScreen("🌐 Browser mode - skipping video debug", 'warning');
-      return;
-    }
+  loadFlipbookFromLocalStorage: async function() {
     try {
-      this.logToScreen("🔍 === CHECKING VIDEO FILES ===", 'info');
-      const { Filesystem } = config.getPlugins();
-      
-      // Check if videos folder exists
-      try {
-        const videoDir = await Filesystem.readdir({
-          path: `${config.APP_FOLDER}/videos`,
-          directory: 'DOCUMENTS'
-        });
-        
-        this.logToScreen(`📁 Videos folder has ${videoDir.files.length} files`, 'info');
-        
-        let videoFileCount = 0;
-        videoDir.files.forEach((file, index) => {
-          if (file.type === 'file' && file.name.endsWith('.mp4')) {
-            videoFileCount++;
-            this.logToScreen(`🎥 Video ${videoFileCount}: ${file.name} (${file.size} bytes)`, 'success');
-          }
-        });
-        
-        if (videoFileCount === 0) {
-          this.logToScreen("❌ NO VIDEO FILES FOUND!", 'error');
-        }
-        
-        // Try to get URI for first video file
-        for (const file of videoDir.files) {
-          if (file.type === 'file' && file.name.endsWith('.mp4')) {
-            try {
-              const fileUri = await Filesystem.getUri({
-                directory: 'DOCUMENTS',
-                path: `${config.APP_FOLDER}/videos/${file.name}`,
-              });
-              this.logToScreen(`📄 Video URI: ${fileUri.uri}`, 'info');
-              break; // Only show first one to save space
-            } catch (uriErr) {
-              this.logToScreen(`❌ Failed to get URI for ${file.name}: ${uriErr.message}`, 'error');
-            }
-          }
-        }
-        
-      } catch (dirErr) {
-        this.logToScreen(`❌ Failed to read videos directory: ${dirErr.message}`, 'error');
-      }
-      
-    } catch (err) {
-      this.logToScreen(`❌ Video debug failed: ${err.message}`, 'error');
-    }
-  },
-  /**
-   * DEBUG JSON DATA - SEE WHAT VIDEO URLS ARE IN THE DATA
-   */
-  debugJsonVideoUrls: function(jsonData, label) {
-    this.logToScreen(`📄 === ${label} ===`, 'info');
-    
-    const collections = jsonData.collections;
-    let videoCount = 0;
-    
-    Object.keys(collections).forEach(collectionKey => {
-      const collection = collections[collectionKey];
-      
-      if (collection.products && Array.isArray(collection.products)) {
-        collection.products.forEach(product => {
-          if (product.video) {
-            videoCount++;
-            const isFileUrl = product.video.startsWith('file://');
-            const isHttpUrl = product.video.startsWith('http');
-            const isCapacitorUrl = product.video.includes('capacitor://');
-            const isBlobUrl = product.video.startsWith('blob:');
-            
-            let urlType = 'OTHER';
-            if (isFileUrl) urlType = 'FILE';
-            else if (isHttpUrl) urlType = 'HTTP';
-            else if (isCapacitorUrl) urlType = 'CAPACITOR';
-            else if (isBlobUrl) urlType = 'BLOB';
-            
-            this.logToScreen(`🎥 ${product.style_code}: ${product.video.substring(0, 50)}...`, 'info');
-            this.logToScreen(`   Type: ${urlType}`, 'info');
-          }
-        });
-      }
-    });
-    
-    this.logToScreen(`📊 Total videos in JSON: ${videoCount}`, 'info');
-  },
-  /**
-   * INJECT COMPREHENSIVE VIDEO DEBUG SCRIPT
-   */
-  injectVideoDebugScript: function(htmlContent) {
-    const videoScript = `
-    <script>
-    // COMPREHENSIVE VIDEO DEBUG SCRIPT
-    console.log("🎥 IFRAME DEBUG: Video debug script loaded");
-    
-    // Create iframe debug overlay
-    function createIframeDebugOverlay() {
-      const debugOverlay = document.createElement('div');
-      debugOverlay.id = 'iframeVideoDebug';
-      debugOverlay.style.cssText = \`
-        position: fixed;
-        top: 50px;
-        right: 10px;
-        width: 300px;
-        max-height: 70vh;
-        background: rgba(255, 0, 0, 0.9);
-        color: white;
-        font-family: monospace;
-        font-size: 10px;
-        padding: 10px;
-        border-radius: 5px;
-        overflow-y: auto;
-        z-index: 10000;
-        border: 2px solid red;
-      \`;
-      
-      debugOverlay.innerHTML = \`
-        <div style="color: yellow; font-weight: bold; margin-bottom: 5px;">
-          🎥 IFRAME VIDEO DEBUG
-          <button onclick="this.parentElement.parentElement.style.display='none'" 
-                  style="float: right; background: black; color: white; border: none; padding: 2px 5px;">✕</button>
-        </div>
-        <div id="iframeDebugContent" style="font-size: 9px; line-height: 1.2;"></div>
-      \`;
-      
-      document.body.appendChild(debugOverlay);
-      return debugOverlay;
-    }
-    
-    function logToIframeDebug(message, type = 'info') {
-      const colors = {
-        info: 'white',
-        warning: 'yellow',
-        error: 'red',
-        success: 'lightgreen'
-      };
-      
-      let debugContent = document.getElementById('iframeDebugContent');
-      if (!debugContent) {
-        createIframeDebugOverlay();
-        debugContent = document.getElementById('iframeDebugContent');
-      }
-      
-      if (debugContent) {
-        const timestamp = new Date().toLocaleTimeString();
-        const logEntry = document.createElement('div');
-        logEntry.style.color = colors[type] || colors.info;
-        logEntry.style.marginBottom = '2px';
-        logEntry.innerHTML = \`[\${timestamp}] \${message}\`;
-        
-        debugContent.appendChild(logEntry);
-        debugContent.scrollTop = debugContent.scrollHeight;
-      }
-      
-      console.log(\`[IFRAME DEBUG] \${message}\`);
-    }
-    
-    // Test getVideoType function with various URLs
-    function testGetVideoType() {
-      logToIframeDebug("🧪 Testing getVideoType function...", 'info');
-      
-      const testUrls = [
-        'blob:https://localhost/test-123',
-        'file:///storage/test.mp4',
-        'capacitor://localhost/test.mp4',
-        'https://dropbox.com/test.mp4',
-        'https://example.com/video.mp4'
-      ];
-      
-      testUrls.forEach(url => {
-        try {
-          const type = getVideoType(url);
-          logToIframeDebug(\`🧪 getVideoType("\${url}") = "\${type}"\`, type === 'local' ? 'success' : 'warning');
-        } catch (err) {
-          logToIframeDebug(\`🧪 getVideoType ERROR for "\${url}": \${err.message}\`, 'error');
-        }
-      });
-    }
-    
-    // Enhanced generateFlipbook function with debugging
-    if (typeof generateFlipbook !== 'undefined') {
-      const originalGenerateFlipbook = generateFlipbook;
-      
-      generateFlipbook = function(collection, collectionKey) {
-        logToIframeDebug(\`📖 generateFlipbook called for: \${collectionKey}\`, 'info');
-        logToIframeDebug(\`📊 Collection has \${collection.products ? collection.products.length : 0} products\`, 'info');
-        
-        // Debug each product's video
-        if (collection.products) {
-          collection.products.forEach((product, index) => {
-            logToIframeDebug(\`📋 Product \${index}: \${product.style_code}\`, 'info');
-            
-            if (product.video) {
-              const videoType = getVideoType(product.video);
-              logToIframeDebug(\`🎥 Video URL: \${product.video}\`, videoType === 'local' ? 'success' : 'warning');
-              logToIframeDebug(\`🏷️ Video Type: \${videoType}\`, videoType === 'local' ? 'success' : 'error');
-              
-              if (videoType === 'local') {
-                logToIframeDebug(\`✅ Will create LOCAL video element\`, 'success');
-              } else {
-                logToIframeDebug(\`❌ Will NOT create video element (type: \${videoType})\`, 'error');
-              }
-            } else {
-              logToIframeDebug(\`ℹ️ No video for this product\`, 'info');
-            }
-          });
-        }
-        
-        // Call original function
-        const result = originalGenerateFlipbook.call(this, collection, collectionKey);
-        
-        // Debug the result after generation
-        setTimeout(() => {
-          logToIframeDebug("🔍 Post-generation analysis:", 'info');
-          
-          const videoPages = document.querySelectorAll('.video-page');
-          const videoElements = document.querySelectorAll('video');
-          const iframes = document.querySelectorAll('iframe');
-          
-          logToIframeDebug(\`📊 Found: \${videoPages.length} video pages, \${videoElements.length} video elements, \${iframes.length} iframes\`, 'info');
-          
-          videoElements.forEach((video, index) => {
-            logToIframeDebug(\`🎥 Video \${index}: src=\${video.src}, readyState=\${video.readyState}\`, 'success');
-          });
-          
-          if (videoElements.length === 0 && videoPages.length > 0) {
-            logToIframeDebug(\`🚨 PROBLEM: We have video pages but no video elements!\`, 'error');
-          }
-          
-        }, 2000);
-        
-        return result;
-      };
-    }
-    
-    // Initialize debugging
-    function initializeVideoDebugging() {
-      logToIframeDebug("🎥 Video debugging initialized", 'success');
-      createIframeDebugOverlay();
-      
-      // Test getVideoType function
-      setTimeout(testGetVideoType, 1000);
-      
-      // Monitor for video elements being added
-      const observer = new MutationObserver(function(mutations) {
-        mutations.forEach(function(mutation) {
-          mutation.addedNodes.forEach(function(node) {
-            if (node.tagName === 'VIDEO') {
-              logToIframeDebug(\`🎥 Video element added: \${node.src}\`, 'success');
-            }
-          });
-        });
-      });
-      
-      observer.observe(document.body, { childList: true, subtree: true });
-    }
-    
-    // Start debugging when DOM is ready
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', initializeVideoDebugging);
-    } else {
-      initializeVideoDebugging();
-    }
-    
-    </script>
-    `;
-    
-    return htmlContent.replace('</body>', videoScript + '</body>');
-  },
-  /**
-   * LOAD FLIPBOOK WITH COMPREHENSIVE VIDEO DEBUGGING
-   */
-  loadFlipbook: async function() {
-    try {
-      // Create debug console first
-      this.createDebugConsole();
-      this.logToScreen("📖 Starting flipbook loading with comprehensive debugging...", 'info');
+      this.logToScreen("📖 Loading flipbook from local storage...", 'info');
+      window.SochUI.updateProgress("Loading from local storage...");
       
       const config = window.SochConfig;
-      let jsonData;
-      let useLocalData = false;
       
-      // STEP 1: GET JSON DATA
-      if (config.isCapacitor) {
-        if (window.SochNetwork.isOnline) {
-          try {
-            this.logToScreen("🌐 Online: Fetching latest data...", 'info');
-            window.SochUI.updateProgress("Fetching latest collection data...");
-            
-            const apiData = await window.SochNetwork.makeApiCall('json');
-            jsonData = apiData.json;
-            
-            await window.SochStorage.saveJsonData(jsonData);
-            this.logToScreen("✅ Using fresh API data", 'success');
-          } catch (err) {
-            this.logToScreen(`⚠️ API failed: ${err.message}`, 'warning');
-            jsonData = await window.SochStorage.readLocalJsonData();
-            if (jsonData) {
-              useLocalData = true;
-              this.logToScreen("✅ Using local cached data as fallback", 'success');
-            } else {
-              throw new Error("Unable to fetch fresh data and no local cache available");
-            }
-          }
-        } else {
-          this.logToScreen("📴 Offline: Using cached data...", 'warning');
-          window.SochUI.updateProgress("Loading from cache (offline mode)...");
-          
-          jsonData = await window.SochStorage.readLocalJsonData();
-          if (jsonData) {
-            useLocalData = true;
-            this.logToScreen("✅ Using local cached data (offline mode)", 'success');
-          } else {
-            throw new Error("No local data available and device is offline. Please connect to internet for first-time setup.");
-          }
-        }
-      } else {
-        this.logToScreen("🌐 Browser mode: Fetching from API...", 'info');
-        const apiData = await window.SochNetwork.makeApiCall('json');
-        jsonData = apiData.json;
-        this.logToScreen("✅ Using API data (browser mode)", 'success');
+      // Step 1: Read local JSON data
+      this.logToScreen("📄 Reading local JSON data...", 'info');
+      const jsonData = await window.SochStorage.readLocalJsonData();
+      if (!jsonData) {
+        throw new Error("No local JSON data available");
       }
       
-      // DEBUG: Check what videos are in the JSON
-      this.debugJsonVideoUrls(jsonData, "ORIGINAL JSON VIDEOS");
+      // Step 2: Replace URLs with local paths
+      this.logToScreen("🔄 Converting URLs to local paths...", 'info');
+      const modifiedJsonData = await window.SochMedia.replaceUrlsWithLocalPaths(jsonData);
       
-      // STEP 2: HANDLE HTML FILE
+      // Step 3: Read HTML file and inject data
+      let htmlContent;
       if (config.isCapacitor) {
-        const htmlExists = await this.checkLocalHtmlExists();
-        
-        if (!htmlExists && window.SochNetwork.isOnline) {
-          await this.downloadAndSaveHtml();
-        } else if (!htmlExists && !window.SochNetwork.isOnline) {
-          throw new Error("No cached HTML available and device is offline.");
-        }
-        
-        // STEP 3: DOWNLOAD MEDIA FILES
-        if (window.SochNetwork.isOnline && !useLocalData) {
-          this.logToScreen("📥 Downloading media files...", 'info');
-          await window.SochMedia.downloadMediaFiles(jsonData);
-        } else {
-          this.logToScreen("ℹ️ Skipping media downloads", 'warning');
-        }
-        
-        // DEBUG: Check what video files are actually downloaded
-        await this.debugVideoFiles();
-        
-        // STEP 4: REPLACE URLS WITH LOCAL PATHS
-        this.logToScreen("🔄 Replacing URLs with local paths...", 'info');
-        window.SochUI.updateProgress("Preparing offline content...");
-        const modifiedJsonData = await window.SochMedia.replaceUrlsWithLocalPaths(jsonData);
-        
-        // DEBUG: Check URLs after replacement
-        this.debugJsonVideoUrls(modifiedJsonData, "MODIFIED JSON VIDEOS");
-        
-        // CRITICAL DEBUG: Check what video URLs are being injected into HTML
-        this.logToScreen("🎯 === FINAL VIDEO URL INJECTION DEBUG ===", 'info');
-        Object.keys(modifiedJsonData.collections).forEach(collectionKey => {
-          const collection = modifiedJsonData.collections[collectionKey];
-          if (collection.products) {
-            collection.products.forEach(product => {
-              if (product.video) {
-                this.logToScreen(`🎯 INJECTING: ${product.style_code} -> ${product.video}`, 'success');
-                this.logToScreen(`🎯 URL Type: ${product.video.startsWith('blob:') ? 'BLOB' : product.video.startsWith('capacitor://') ? 'CAPACITOR' : product.video.startsWith('file://') ? 'FILE' : 'OTHER'}`, 'info');
-                this.logToScreen(`🎯 Should be recognized as LOCAL: ${product.video.startsWith('blob:') || product.video.startsWith('capacitor://') || product.video.startsWith('file://')}`, product.video.startsWith('blob:') ? 'success' : 'warning');
-              }
-            });
-          }
-        });
-        
-        // STEP 5: READ AND MODIFY HTML
-        this.logToScreen("📄 Reading HTML file...", 'info');
+        this.logToScreen("📄 Reading local HTML file...", 'info');
         const { Filesystem } = config.getPlugins();
-        const htmlContent = await Filesystem.readFile({
+        const htmlFile = await Filesystem.readFile({
           path: `${config.APP_FOLDER}/html/flipbook.html`,
           directory: 'DOCUMENTS',
           encoding: 'utf8'
         });
-        
-        // STEP 6: INJECT DEBUG SCRIPT AND DATA
-        this.logToScreen("🎥 Injecting comprehensive video debug script...", 'info');
-        let modifiedHtml = this.injectVideoDebugScript(htmlContent.data);
-        
-        // Inject the modified JSON data
-        const jsonString = JSON.stringify(modifiedJsonData.collections, null, 2);
-        modifiedHtml = modifiedHtml.replace(
-          /collections = \{\};/,
-          `collections = ${jsonString};`
-        );
-        
-        this.logToScreen("📋 JSON data injected into HTML", 'success');
-        this.logToScreen(`📊 JSON size: ${jsonString.length} characters`, 'info');
-        
-        // STEP 7: RENDER FLIPBOOK
-        const container = document.getElementById('flipbookContainer');
-        if (container) {
-          container.innerHTML = `
-            <iframe id="flipbookFrame" 
-                    style="width: 100%; height: 100vh; border: none;"
-                    srcdoc="${modifiedHtml.replace(/"/g, '&quot;')}"
-                    allow="autoplay; fullscreen; camera; microphone"
-                    sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-modals">
-            </iframe>
-          `;
-          this.logToScreen("✅ Flipbook loaded with comprehensive debugging", 'success');
-          return true;
-        }
+        htmlContent = htmlFile.data;
       } else {
-        // Browser mode
-        this.logToScreen("🌐 Browser mode loading...", 'info');
+        // Browser mode - fetch from API
+        this.logToScreen("🌐 Browser mode - fetching HTML from API...", 'info');
+        const htmlUrlData = await window.SochNetwork.makeApiCall('html_url');
+        htmlContent = await this.downloadAndSaveHtml(htmlUrlData.html_url);
+      }
+      
+      // Step 4: Inject JSON data into HTML
+      this.logToScreen("💉 Injecting JSON data into HTML...", 'info');
+      const jsonString = JSON.stringify(modifiedJsonData.collections, null, 2);
+      const modifiedHtml = htmlContent.replace(
+        /collections = \{\};/,
+        `collections = ${jsonString};`
+      );
+      
+      // Step 5: Render flipbook
+      this.logToScreen("🎬 Rendering flipbook...", 'info');
+      const container = document.getElementById('flipbookContainer');
+      if (container) {
+        container.innerHTML = `
+          <iframe id="flipbookFrame" 
+                  style="width: 100%; height: 100vh; border: none;"
+                  srcdoc="${modifiedHtml.replace(/"/g, '&quot;')}"
+                  allow="autoplay; fullscreen; camera; microphone"
+                  sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-modals">
+          </iframe>
+        `;
         
-        const htmlContent = await this.downloadAndSaveHtml();
-        
-        const modifiedHtml = htmlContent.replace(
-          /collections = \{\};/,
-          `collections = ${JSON.stringify(jsonData.collections, null, 2)};`
-        );
-        
-        const container = document.getElementById('flipbookContainer');
-        if (container) {
-          container.innerHTML = `
-            <iframe id="flipbookFrame" 
-                    style="width: 100%; height: 100vh; border: none;"
-                    srcdoc="${modifiedHtml.replace(/"/g, '&quot;')}"
-                    allow="autoplay; fullscreen">
-            </iframe>
-          `;
-          this.logToScreen("✅ Flipbook loaded (browser mode)", 'success');
-          return true;
-        }
+        this.logToScreen("✅ Flipbook loaded successfully from local storage", 'success');
+        window.SochUI.updateProgress("Ready!");
+        return true;
       }
       
       return false;
+      
     } catch (err) {
-      this.logToScreen(`❌ Failed to load flipbook: ${err.message}`, 'error');
+      this.logToScreen(`❌ Failed to load from local storage: ${err.message}`, 'error');
+      throw new Error(`Local storage load failed: ${err.message}`);
+    }
+  },
+  
+  /**
+   * MAIN LOAD FLIPBOOK FUNCTION - IMPLEMENTS YOUR EXACT FLOW
+   */
+  loadFlipbook: async function() {
+    try {
+      // Create debug console
+      this.createDebugConsole();
+      this.logToScreen("🚀 Starting flipbook load with correct flow...", 'info');
+      
+      const config = window.SochConfig;
+      const isOnline = window.SochNetwork.isOnline;
+      
+      this.logToScreen(`📱 Platform: ${config.isCapacitor ? 'Mobile (Capacitor)' : 'Browser'}`, 'info');
+      this.logToScreen(`🌐 Network: ${isOnline ? 'Online' : 'Offline'}`, 'info');
+      this.logToScreen(`📊 Session check: ${this.hasCheckedVersionsThisSession ? 'Already checked' : 'First time'}`, 'info');
+      
+      // STEP 1: Check if we have local data
+      const hasLocalData = await this.checkLocalDataExists();
+      
+      if (!hasLocalData) {
+        // No local data - must be first time setup
+        this.logToScreen("🆕 First time setup - no local data found", 'warning');
+        
+        if (!isOnline) {
+          throw new Error("First time setup requires internet connection. Please connect to internet and try again.");
+        }
+        
+        // Force download everything for first time
+        this.logToScreen("📥 First time - downloading all content...", 'info');
+        const versionCheck = await this.checkIfVersionsChanged();
+        await this.downloadAndUpdateContent(versionCheck.apiData);
+        this.hasCheckedVersionsThisSession = true;
+        
+        // Now load from local storage
+        return await this.loadFlipbookFromLocalStorage();
+      }
+      
+      // STEP 2: We have local data - check if we need to update (only when online + first time this session)
+      if (isOnline && !this.hasCheckedVersionsThisSession) {
+        this.logToScreen("🔍 Online + first session - checking for updates...", 'info');
+        
+        try {
+          const versionCheck = await this.checkIfVersionsChanged();
+          this.hasCheckedVersionsThisSession = true;
+          
+          if (versionCheck.changed) {
+            this.logToScreen("🆙 Updates found - downloading new content...", 'warning');
+            await this.downloadAndUpdateContent(versionCheck.apiData);
+          } else {
+            this.logToScreen("✅ No updates needed - content is current", 'success');
+          }
+        } catch (versionErr) {
+          this.logToScreen(`⚠️ Version check failed, using local data: ${versionErr.message}`, 'warning');
+        }
+      } else if (!isOnline) {
+        this.logToScreen("📴 Offline mode - skipping version check", 'info');
+      } else {
+        this.logToScreen("✅ Already checked versions this session - skipping", 'info');
+      }
+      
+      // STEP 3: Always load from local storage
+      this.logToScreen("📖 Loading content from local storage...", 'info');
+      return await this.loadFlipbookFromLocalStorage();
+      
+    } catch (err) {
+      this.logToScreen(`❌ Flipbook load failed: ${err.message}`, 'error');
       this.showErrorMessage(err.message);
       return false;
     }
   },
+  
   /**
    * SHOW ERROR MESSAGE
    */
@@ -598,10 +429,14 @@ window.SochFlipbook = {
                 'Please check your internet connection and try again.' : 
                 'Please connect to internet for first-time setup, then the app will work offline.'}
             </p>
+            <button onclick="window.SochFlipbook.loadFlipbook()" style="background: white; color: #667eea; border: none; padding: 12px 24px; border-radius: 20px; font-weight: bold; margin-top: 20px; cursor: pointer;">
+              Try Again
+            </button>
           </div>
         </div>
       `;
     }
   }
 };
-console.log("✅ Flipbook module loaded with comprehensive video debugging");
+
+console.log("✅ Flipbook module loaded with correct offline-first flow");
