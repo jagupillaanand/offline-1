@@ -1,11 +1,9 @@
 /**
- * FLIPBOOK.JS - Flipbook Management Module with ON-SCREEN VIDEO DEBUGGING
+ * FLIPBOOK.JS - Flipbook Management Module with Comprehensive Video Debugging
  * 
- * This version shows all video debug information directly on the screen
+ * This version includes extensive debugging to track video URL processing
  */
-
 window.SochFlipbook = {
-
   /**
    * CREATE ON-SCREEN DEBUG CONSOLE
    */
@@ -15,7 +13,6 @@ window.SochFlipbook = {
     if (existingConsole) {
       existingConsole.remove();
     }
-
     // Create debug console overlay
     const debugConsole = document.createElement('div');
     debugConsole.id = 'videoDebugConsole';
@@ -35,7 +32,6 @@ window.SochFlipbook = {
       z-index: 10000;
       border: 2px solid #00ff00;
     `;
-
     debugConsole.innerHTML = `
       <div style="color: #ffff00; font-weight: bold; margin-bottom: 5px;">
         🎥 VIDEO DEBUG CONSOLE
@@ -44,11 +40,9 @@ window.SochFlipbook = {
       </div>
       <div id="debugContent" style="font-size: 9px; line-height: 1.2;"></div>
     `;
-
     document.body.appendChild(debugConsole);
     return debugConsole;
   },
-
   /**
    * LOG TO ON-SCREEN CONSOLE
    */
@@ -59,7 +53,6 @@ window.SochFlipbook = {
       error: '#ff0000',
       success: '#00ffff'
     };
-
     const debugContent = document.getElementById('debugContent');
     if (debugContent) {
       const timestamp = new Date().toLocaleTimeString();
@@ -71,11 +64,9 @@ window.SochFlipbook = {
       debugContent.appendChild(logEntry);
       debugContent.scrollTop = debugContent.scrollHeight;
     }
-
     // Also log to regular console
-    console.log(`[VIDEO DEBUG] ${message}`);
+    console.log(`[FLIPBOOK DEBUG] ${message}`);
   },
-
   /**
    * CHECK IF HTML FILE EXISTS LOCALLY
    */
@@ -100,7 +91,6 @@ window.SochFlipbook = {
       return false;
     }
   },
-
   /**
    * DOWNLOAD AND SAVE HTML FILE
    */
@@ -122,7 +112,6 @@ window.SochFlipbook = {
           directory: 'DOCUMENTS',
           path: `${config.APP_FOLDER}/html/flipbook.html`,
         });
-
         await FileTransfer.downloadFile({
           url: htmlUrl,
           path: fileUri.uri,
@@ -142,7 +131,6 @@ window.SochFlipbook = {
       throw new Error(`HTML download failed: ${err.message}`);
     }
   },
-
   /**
    * DEBUG VIDEO FILES - CHECK WHAT'S ACTUALLY IN THE VIDEOS FOLDER
    */
@@ -153,7 +141,6 @@ window.SochFlipbook = {
       this.logToScreen("🌐 Browser mode - skipping video debug", 'warning');
       return;
     }
-
     try {
       this.logToScreen("🔍 === CHECKING VIDEO FILES ===", 'info');
       const { Filesystem } = config.getPlugins();
@@ -203,7 +190,6 @@ window.SochFlipbook = {
       this.logToScreen(`❌ Video debug failed: ${err.message}`, 'error');
     }
   },
-
   /**
    * DEBUG JSON DATA - SEE WHAT VIDEO URLS ARE IN THE DATA
    */
@@ -222,10 +208,17 @@ window.SochFlipbook = {
             videoCount++;
             const isFileUrl = product.video.startsWith('file://');
             const isHttpUrl = product.video.startsWith('http');
-            const isCapacitorUrl = product.video.includes('_capacitor_file_');
+            const isCapacitorUrl = product.video.includes('capacitor://');
+            const isBlobUrl = product.video.startsWith('blob:');
+            
+            let urlType = 'OTHER';
+            if (isFileUrl) urlType = 'FILE';
+            else if (isHttpUrl) urlType = 'HTTP';
+            else if (isCapacitorUrl) urlType = 'CAPACITOR';
+            else if (isBlobUrl) urlType = 'BLOB';
             
             this.logToScreen(`🎥 ${product.style_code}: ${product.video.substring(0, 50)}...`, 'info');
-            this.logToScreen(`   Type: ${isFileUrl ? 'FILE' : isHttpUrl ? 'HTTP' : isCapacitorUrl ? 'CAPACITOR' : 'OTHER'}`, 'info');
+            this.logToScreen(`   Type: ${urlType}`, 'info');
           }
         });
       }
@@ -233,14 +226,16 @@ window.SochFlipbook = {
     
     this.logToScreen(`📊 Total videos in JSON: ${videoCount}`, 'info');
   },
-
   /**
-   * INJECT ON-SCREEN VIDEO DEBUG SCRIPT
+   * INJECT COMPREHENSIVE VIDEO DEBUG SCRIPT
    */
   injectVideoDebugScript: function(htmlContent) {
     const videoScript = `
     <script>
-    // Create debug overlay inside iframe
+    // COMPREHENSIVE VIDEO DEBUG SCRIPT
+    console.log("🎥 IFRAME DEBUG: Video debug script loaded");
+    
+    // Create iframe debug overlay
     function createIframeDebugOverlay() {
       const debugOverlay = document.createElement('div');
       debugOverlay.id = 'iframeVideoDebug';
@@ -299,184 +294,129 @@ window.SochFlipbook = {
         debugContent.scrollTop = debugContent.scrollHeight;
       }
       
-      console.log(\`[IFRAME VIDEO DEBUG] \${message}\`);
+      console.log(\`[IFRAME DEBUG] \${message}\`);
     }
     
-    function enhanceVideoHandling() {
-      logToIframeDebug("🎥 Starting video enhancement...", 'info');
+    // Test getVideoType function with various URLs
+    function testGetVideoType() {
+      logToIframeDebug("🧪 Testing getVideoType function...", 'info');
       
-      // Create debug overlay
+      const testUrls = [
+        'blob:https://localhost/test-123',
+        'file:///storage/test.mp4',
+        'capacitor://localhost/test.mp4',
+        'https://dropbox.com/test.mp4',
+        'https://example.com/video.mp4'
+      ];
+      
+      testUrls.forEach(url => {
+        try {
+          const type = getVideoType(url);
+          logToIframeDebug(\`🧪 getVideoType("\${url}") = "\${type}"\`, type === 'local' ? 'success' : 'warning');
+        } catch (err) {
+          logToIframeDebug(\`🧪 getVideoType ERROR for "\${url}": \${err.message}\`, 'error');
+        }
+      });
+    }
+    
+    // Enhanced generateFlipbook function with debugging
+    if (typeof generateFlipbook !== 'undefined') {
+      const originalGenerateFlipbook = generateFlipbook;
+      
+      generateFlipbook = function(collection, collectionKey) {
+        logToIframeDebug(\`📖 generateFlipbook called for: \${collectionKey}\`, 'info');
+        logToIframeDebug(\`📊 Collection has \${collection.products ? collection.products.length : 0} products\`, 'info');
+        
+        // Debug each product's video
+        if (collection.products) {
+          collection.products.forEach((product, index) => {
+            logToIframeDebug(\`📋 Product \${index}: \${product.style_code}\`, 'info');
+            
+            if (product.video) {
+              const videoType = getVideoType(product.video);
+              logToIframeDebug(\`🎥 Video URL: \${product.video}\`, videoType === 'local' ? 'success' : 'warning');
+              logToIframeDebug(\`🏷️ Video Type: \${videoType}\`, videoType === 'local' ? 'success' : 'error');
+              
+              if (videoType === 'local') {
+                logToIframeDebug(\`✅ Will create LOCAL video element\`, 'success');
+              } else {
+                logToIframeDebug(\`❌ Will NOT create video element (type: \${videoType})\`, 'error');
+              }
+            } else {
+              logToIframeDebug(\`ℹ️ No video for this product\`, 'info');
+            }
+          });
+        }
+        
+        // Call original function
+        const result = originalGenerateFlipbook.call(this, collection, collectionKey);
+        
+        // Debug the result after generation
+        setTimeout(() => {
+          logToIframeDebug("🔍 Post-generation analysis:", 'info');
+          
+          const videoPages = document.querySelectorAll('.video-page');
+          const videoElements = document.querySelectorAll('video');
+          const iframes = document.querySelectorAll('iframe');
+          
+          logToIframeDebug(\`📊 Found: \${videoPages.length} video pages, \${videoElements.length} video elements, \${iframes.length} iframes\`, 'info');
+          
+          videoElements.forEach((video, index) => {
+            logToIframeDebug(\`🎥 Video \${index}: src=\${video.src}, readyState=\${video.readyState}\`, 'success');
+          });
+          
+          if (videoElements.length === 0 && videoPages.length > 0) {
+            logToIframeDebug(\`🚨 PROBLEM: We have video pages but no video elements!\`, 'error');
+          }
+          
+        }, 2000);
+        
+        return result;
+      };
+    }
+    
+    // Initialize debugging
+    function initializeVideoDebugging() {
+      logToIframeDebug("🎥 Video debugging initialized", 'success');
       createIframeDebugOverlay();
       
-      setTimeout(() => {
-        debugAllVideos();
-      }, 2000);
+      // Test getVideoType function
+      setTimeout(testGetVideoType, 1000);
       
-      // Override flipbook generation if available
-      if (typeof generateFlipbook !== 'undefined') {
-        const originalGenerateFlipbook = generateFlipbook;
-        
-        generateFlipbook = function(collection, collectionKey) {
-          logToIframeDebug(\`🎥 Generating flipbook for: \${collectionKey}\`, 'info');
-          
-          const result = originalGenerateFlipbook.call(this, collection, collectionKey);
-          
-          setTimeout(() => {
-            logToIframeDebug("🔄 Post-flipbook video debug", 'info');
-            debugAllVideos();
-            enhanceAllVideos();
-          }, 3000);
-          
-          return result;
-        };
-      }
-    }
-    
-    function debugAllVideos() {
-      logToIframeDebug("🔍 === IFRAME VIDEO ANALYSIS ===", 'info');
-      
-      const allIframes = document.querySelectorAll('iframe');
-      const allVideos = document.querySelectorAll('video');
-      const allVideoPages = document.querySelectorAll('.video-page');
-      
-      logToIframeDebug(\`📊 Elements: \${allIframes.length} iframes, \${allVideos.length} videos, \${allVideoPages.length} video pages\`, 'info');
-      
-      // Debug video pages
-      allVideoPages.forEach((page, index) => {
-        logToIframeDebug(\`📄 Video Page \${index + 1}:\`, 'info');
-        const pageIframes = page.querySelectorAll('iframe');
-        const pageVideos = page.querySelectorAll('video');
-        logToIframeDebug(\`   Has \${pageIframes.length} iframes, \${pageVideos.length} videos\`, 'info');
-        
-        pageIframes.forEach((iframe, iIndex) => {
-          logToIframeDebug(\`   Iframe \${iIndex + 1}: src=\${iframe.src || 'NONE'}\`, 'warning');
-          if (iframe.srcdoc) {
-            const hasVideo = iframe.srcdoc.includes('.mp4');
-            logToIframeDebug(\`   Iframe \${iIndex + 1}: srcdoc has video=\${hasVideo}\`, hasVideo ? 'success' : 'error');
-            if (hasVideo) {
-              const videoMatch = iframe.srcdoc.match(/src="([^"]+\.mp4[^"]*)"/);
-              if (videoMatch) {
-                logToIframeDebug(\`   Found video URL: \${videoMatch[1]}\`, 'success');
-              }
+      // Monitor for video elements being added
+      const observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+          mutation.addedNodes.forEach(function(node) {
+            if (node.tagName === 'VIDEO') {
+              logToIframeDebug(\`🎥 Video element added: \${node.src}\`, 'success');
             }
-          }
+          });
         });
       });
+      
+      observer.observe(document.body, { childList: true, subtree: true });
     }
     
-    function enhanceAllVideos() {
-      logToIframeDebug("🔄 Starting video enhancement...", 'info');
-      
-      const videoPages = document.querySelectorAll('.video-page');
-      
-      videoPages.forEach((page, pageIndex) => {
-        const iframes = page.querySelectorAll('iframe');
-        
-        iframes.forEach((iframe, iframeIndex) => {
-          let videoSrc = iframe.src;
-          
-          if (!videoSrc && iframe.srcdoc) {
-            const srcDocMatch = iframe.srcdoc.match(/src="([^"]+\.mp4[^"]*)"/);
-            if (srcDocMatch) {
-              videoSrc = srcDocMatch[1];
-              logToIframeDebug(\`✅ Found video in srcdoc: \${videoSrc}\`, 'success');
-            }
-          }
-          
-          if (videoSrc && videoSrc.includes('.mp4')) {
-            logToIframeDebug(\`🎥 Creating video for: \${videoSrc}\`, 'info');
-            
-            const video = document.createElement('video');
-            video.src = videoSrc;
-            video.controls = true;
-            video.autoplay = false;
-            video.loop = true;
-            video.muted = true;
-            
-            video.style.width = '100%';
-            video.style.height = '100%';
-            video.style.maxHeight = '90vh';
-            video.style.objectFit = 'contain';
-            video.style.backgroundColor = '#000';
-            video.style.border = '3px solid lime';
-            
-            video.addEventListener('loadedmetadata', () => {
-              logToIframeDebug(\`✅ Video loaded: \${videoSrc}\`, 'success');
-            });
-            
-            video.addEventListener('error', (e) => {
-              logToIframeDebug(\`❌ Video error: \${video.error ? video.error.code : 'Unknown'}\`, 'error');
-              logToIframeDebug(\`❌ Source: \${videoSrc}\`, 'error');
-              
-              // Show detailed error on the video element
-              const errorDisplay = document.createElement('div');
-              errorDisplay.style.cssText = \`
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                height: 100%;
-                background: red;
-                color: white;
-                text-align: center;
-                padding: 20px;
-                font-size: 12px;
-              \`;
-              
-              errorDisplay.innerHTML = \`
-                <div>
-                  <h3>🚨 VIDEO ERROR</h3>
-                  <p>Error Code: \${video.error ? video.error.code : 'Unknown'}</p>
-                  <p>Source: \${videoSrc}</p>
-                  <p>File: \${videoSrc.split('/').pop()}</p>
-                  <p>Ready State: \${video.readyState}</p>
-                  <p>Network State: \${video.networkState}</p>
-                </div>
-              \`;
-              
-              video.parentNode.replaceChild(errorDisplay, video);
-            });
-            
-            iframe.parentNode.replaceChild(video, iframe);
-            logToIframeDebug(\`✅ Replaced iframe with video element\`, 'success');
-          }
-        });
-      });
-    }
-    
-    // Initialize
+    // Start debugging when DOM is ready
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', enhanceVideoHandling);
+      document.addEventListener('DOMContentLoaded', initializeVideoDebugging);
     } else {
-      enhanceVideoHandling();
+      initializeVideoDebugging();
     }
-    
-    // Periodic checks
-    let checkCount = 0;
-    const checker = setInterval(() => {
-      checkCount++;
-      logToIframeDebug(\`🔄 Check #\${checkCount}\`, 'info');
-      debugAllVideos();
-      
-      if (checkCount >= 5) {
-        clearInterval(checker);
-        logToIframeDebug("🛑 Stopping periodic checks", 'warning');
-      }
-    }, 4000);
     
     </script>
     `;
     
     return htmlContent.replace('</body>', videoScript + '</body>');
   },
-
   /**
-   * LOAD FLIPBOOK WITH ON-SCREEN VIDEO DEBUGGING
+   * LOAD FLIPBOOK WITH COMPREHENSIVE VIDEO DEBUGGING
    */
   loadFlipbook: async function() {
     try {
       // Create debug console first
       this.createDebugConsole();
-      this.logToScreen("📖 Starting flipbook loading with on-screen debugging...", 'info');
+      this.logToScreen("📖 Starting flipbook loading with comprehensive debugging...", 'info');
       
       const config = window.SochConfig;
       let jsonData;
@@ -522,10 +462,10 @@ window.SochFlipbook = {
         jsonData = apiData.json;
         this.logToScreen("✅ Using API data (browser mode)", 'success');
       }
-
+      
       // DEBUG: Check what videos are in the JSON
       this.debugJsonVideoUrls(jsonData, "ORIGINAL JSON VIDEOS");
-
+      
       // STEP 2: HANDLE HTML FILE
       if (config.isCapacitor) {
         const htmlExists = await this.checkLocalHtmlExists();
@@ -535,7 +475,7 @@ window.SochFlipbook = {
         } else if (!htmlExists && !window.SochNetwork.isOnline) {
           throw new Error("No cached HTML available and device is offline.");
         }
-
+        
         // STEP 3: DOWNLOAD MEDIA FILES
         if (window.SochNetwork.isOnline && !useLocalData) {
           this.logToScreen("📥 Downloading media files...", 'info');
@@ -543,18 +483,33 @@ window.SochFlipbook = {
         } else {
           this.logToScreen("ℹ️ Skipping media downloads", 'warning');
         }
-
+        
         // DEBUG: Check what video files are actually downloaded
         await this.debugVideoFiles();
-
+        
         // STEP 4: REPLACE URLS WITH LOCAL PATHS
         this.logToScreen("🔄 Replacing URLs with local paths...", 'info');
         window.SochUI.updateProgress("Preparing offline content...");
         const modifiedJsonData = await window.SochMedia.replaceUrlsWithLocalPaths(jsonData);
-
+        
         // DEBUG: Check URLs after replacement
         this.debugJsonVideoUrls(modifiedJsonData, "MODIFIED JSON VIDEOS");
-
+        
+        // CRITICAL DEBUG: Check what video URLs are being injected into HTML
+        this.logToScreen("🎯 === FINAL VIDEO URL INJECTION DEBUG ===", 'info');
+        Object.keys(modifiedJsonData.collections).forEach(collectionKey => {
+          const collection = modifiedJsonData.collections[collectionKey];
+          if (collection.products) {
+            collection.products.forEach(product => {
+              if (product.video) {
+                this.logToScreen(`🎯 INJECTING: ${product.style_code} -> ${product.video}`, 'success');
+                this.logToScreen(`🎯 URL Type: ${product.video.startsWith('blob:') ? 'BLOB' : product.video.startsWith('capacitor://') ? 'CAPACITOR' : product.video.startsWith('file://') ? 'FILE' : 'OTHER'}`, 'info');
+                this.logToScreen(`🎯 Should be recognized as LOCAL: ${product.video.startsWith('blob:') || product.video.startsWith('capacitor://') || product.video.startsWith('file://')}`, product.video.startsWith('blob:') ? 'success' : 'warning');
+              }
+            });
+          }
+        });
+        
         // STEP 5: READ AND MODIFY HTML
         this.logToScreen("📄 Reading HTML file...", 'info');
         const { Filesystem } = config.getPlugins();
@@ -563,16 +518,21 @@ window.SochFlipbook = {
           directory: 'DOCUMENTS',
           encoding: 'utf8'
         });
-
+        
         // STEP 6: INJECT DEBUG SCRIPT AND DATA
-        this.logToScreen("🎥 Injecting video debug script...", 'info');
+        this.logToScreen("🎥 Injecting comprehensive video debug script...", 'info');
         let modifiedHtml = this.injectVideoDebugScript(htmlContent.data);
-
+        
+        // Inject the modified JSON data
+        const jsonString = JSON.stringify(modifiedJsonData.collections, null, 2);
         modifiedHtml = modifiedHtml.replace(
           /collections = \{\};/,
-          `collections = ${JSON.stringify(modifiedJsonData.collections, null, 2)};`
+          `collections = ${jsonString};`
         );
-
+        
+        this.logToScreen("📋 JSON data injected into HTML", 'success');
+        this.logToScreen(`📊 JSON size: ${jsonString.length} characters`, 'info');
+        
         // STEP 7: RENDER FLIPBOOK
         const container = document.getElementById('flipbookContainer');
         if (container) {
@@ -584,7 +544,7 @@ window.SochFlipbook = {
                     sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-modals">
             </iframe>
           `;
-          this.logToScreen("✅ Flipbook loaded with on-screen debugging", 'success');
+          this.logToScreen("✅ Flipbook loaded with comprehensive debugging", 'success');
           return true;
         }
       } else {
@@ -619,7 +579,6 @@ window.SochFlipbook = {
       return false;
     }
   },
-
   /**
    * SHOW ERROR MESSAGE
    */
@@ -645,5 +604,4 @@ window.SochFlipbook = {
     }
   }
 };
-
-console.log("✅ Flipbook module loaded with ON-SCREEN video debugging");
+console.log("✅ Flipbook module loaded with comprehensive video debugging");

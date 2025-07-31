@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SochApp Log Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Courier New', monospace;
+            background: #1a1a1a;
+            color: #00ff00;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .header {
+            background: #333;
+            padding: 10px 20px;
+            border-bottom: 2px solid #555;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .header h1 {
+            color: #00ff00;
+            font-size: 1.2rem;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+        }
+        
+        button {
+            background: #555;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        
+        button:hover {
+            background: #777;
+        }
+        
+        button.copy {
+            background: #007acc;
+        }
+        
+        button.clear {
+            background: #cc4400;
+        }
+        
+        .log-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+            background: #000;
+        }
+        
+        .log-entry {
+            margin-bottom: 2px;
+            padding: 2px 5px;
+            border-radius: 2px;
+            font-size: 11px;
+            line-height: 1.3;
+            word-wrap: break-word;
+        }
+        
+        .log-entry.info {
+            color: #00ff00;
+        }
+        
+        .log-entry.warning {
+            color: #ffaa00;
+            background: rgba(255, 170, 0, 0.1);
+        }
+        
+        .log-entry.error {
+            color: #ff4444;
+            background: rgba(255, 68, 68, 0.1);
+        }
+        
+        .log-entry.debug {
+            color: #00aaff;
+        }
+        
+        .log-entry.success {
+            color: #44ff44;
+        }
+        
+        .timestamp {
+            color: #888;
+            font-size: 10px;
+        }
+        
+        .status {
+            background: #222;
+            padding: 5px 20px;
+            border-top: 1px solid #555;
+            font-size: 11px;
+            color: #aaa;
+        }
+        
+        .copy-notification {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #007acc;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🎥 SochApp Log Viewer</h1>
+        <div class="controls">
+            <button class="copy" onclick="copyLogs()">📋 Copy All Logs</button>
+            <button class="clear" onclick="clearLogs()">🗑️ Clear</button>
+            <button onclick="toggleAutoScroll()">📜 Auto-scroll: <span id="autoScrollStatus">ON</span></button>
+        </div>
+    </div>
+    
+    <div class="log-container" id="logContainer">
+        <div class="log-entry info">
+            <span class="timestamp">[READY]</span> Log viewer initialized. Waiting for app logs...
+        </div>
+    </div>
+    
+    <div class="status">
+        Total logs: <span id="logCount">0</span> | 
+        Last updated: <span id="lastUpdate">Never</span> | 
+        Auto-scroll: <span id="autoScrollIndicator">ON</span>
+    </div>
+    
+    <div class="copy-notification" id="copyNotification">
+        ✅ Logs copied to clipboard!
+    </div>
+
+    <script>
+        let logCount = 0;
+        let autoScroll = true;
+        let allLogs = [];
+        
+        // Override console methods to capture logs
+        const originalConsoleLog = console.log;
+        const originalConsoleError = console.error;
+        const originalConsoleWarn = console.warn;
+        
+        function addLogEntry(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logContainer = document.getElementById('logContainer');
+            
+            // Create log entry
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry ${type}`;
+            logEntry.innerHTML = `<span class="timestamp">[${timestamp}]</span> ${message}`;
+            
+            // Add to container
+            logContainer.appendChild(logEntry);
+            
+            // Store in array for copying
+            allLogs.push(`[${timestamp}] ${message}`);
+            
+            // Update counter
+            logCount++;
+            document.getElementById('logCount').textContent = logCount;
+            document.getElementById('lastUpdate').textContent = timestamp;
+            
+            // Auto-scroll if enabled
+            if (autoScroll) {
+                logEntry.scrollIntoView({ behavior: 'smooth' });
+            }
+            
+            // Limit logs to prevent memory issues (keep last 1000)
+            if (allLogs.length > 1000) {
+                allLogs.shift();
+                logContainer.removeChild(logContainer.firstChild.nextSibling);
+            }
+        }
+        
+        // Override console methods
+        console.log = function(...args) {
+            const message = args.join(' ');
+            let type = 'info';
+            
+            // Determine log type based on content
+            if (message.includes('❌') || message.includes('ERROR') || message.includes('FAILED')) {
+                type = 'error';
+            } else if (message.includes('⚠️') || message.includes('WARNING') || message.includes('WARN')) {
+                type = 'warning';
+            } else if (message.includes('✅') || message.includes('SUCCESS') || message.includes('COMPLETED')) {
+                type = 'success';
+            } else if (message.includes('🔍') || message.includes('DEBUG') || message.includes('===')) {
+                type = 'debug';
+            }
+            
+            addLogEntry(message, type);
+            originalConsoleLog.apply(console, args);
+        };
+        
+        console.error = function(...args) {
+            const message = args.join(' ');
+            addLogEntry(message, 'error');
+            originalConsoleError.apply(console, args);
+        };
+        
+        console.warn = function(...args) {
+            const message = args.join(' ');
+            addLogEntry(message, 'warning');
+            originalConsoleWarn.apply(console, args);
+        };
+        
+        // Control functions
+        function copyLogs() {
+            const logText = allLogs.join('\n');
+            navigator.clipboard.writeText(logText).then(() => {
+                showCopyNotification();
+            }).catch(err => {
+                // Fallback for older browsers
+                const textArea = document.createElement('textarea');
+                textArea.value = logText;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+                showCopyNotification();
+            });
+        }
+        
+        function showCopyNotification() {
+            const notification = document.getElementById('copyNotification');
+            notification.style.display = 'block';
+            setTimeout(() => {
+                notification.style.display = 'none';
+            }, 2000);
+        }
+        
+        function clearLogs() {
+            const logContainer = document.getElementById('logContainer');
+            logContainer.innerHTML = '<div class="log-entry info"><span class="timestamp">[CLEARED]</span> Logs cleared.</div>';
+            allLogs = [];
+            logCount = 0;
+            document.getElementById('logCount').textContent = logCount;
+            document.getElementById('lastUpdate').textContent = 'Just now';
+        }
+        
+        function toggleAutoScroll() {
+            autoScroll = !autoScroll;
+            document.getElementById('autoScrollStatus').textContent = autoScroll ? 'ON' : 'OFF';
+            document.getElementById('autoScrollIndicator').textContent = autoScroll ? 'ON' : 'OFF';
+        }
+        
+        // Add initial instructions
+        setTimeout(() => {
+            addLogEntry('📱 Open your SochApp and perform the test. All console logs will appear here in real-time.', 'info');
+            addLogEntry('🔄 To test: 1) Test ONLINE mode, 2) Turn off internet, 3) Test OFFLINE mode', 'info');
+            addLogEntry('📋 Use "Copy All Logs" button to copy everything for analysis.', 'info');
+        }, 1000);
+        
+        // Heartbeat to show the viewer is working
+        setInterval(() => {
+            const now = new Date();
+            if (now.getSeconds() === 0) { // Every minute
+                addLogEntry(`💓 Log viewer active - ${new Date().toLocaleString()}`, 'debug');
+            }
+        }, 1000);
+    </script>
+</body>
+</html>
