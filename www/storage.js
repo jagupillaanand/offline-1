@@ -7,10 +7,10 @@
  * - Local file existence checking
  * - Media file organization (images/videos)
  * - Duplicate download prevention
+ * - Version checking and management
  * 
  * Dependencies: config.js (must be loaded first)
  */
-
 window.SochStorage = {
   
   // Track downloaded URLs to prevent duplicates
@@ -49,7 +49,6 @@ window.SochStorage = {
       throw new Error(`Permission error: ${err.message}`);
     }
   },
-
   /**
    * CHECK IF FOLDER EXISTS
    * Checks if a specific folder exists in the Documents directory.
@@ -78,7 +77,6 @@ window.SochStorage = {
       return false; // Error means folder doesn't exist
     }
   },
-
   /**
    * CREATE APP FOLDER STRUCTURE
    * Creates the main SochApp folder and all required subfolders.
@@ -100,7 +98,6 @@ window.SochStorage = {
       console.log("📂 Browser mode - folders simulated");
       return;
     }
-
     try {
       const { Filesystem } = config.getPlugins();
       
@@ -116,7 +113,6 @@ window.SochStorage = {
       } else {
         console.log("ℹ️ Main folder already exists:", config.APP_FOLDER);
       }
-
       // Step 2: Create each subfolder if it doesn't exist
       for (const subfolder of config.SUBFOLDERS) {
         const subfolderPath = `${config.APP_FOLDER}/${subfolder}`;
@@ -143,7 +139,6 @@ window.SochStorage = {
       }
     }
   },
-
   /**
    * EXTRACT FILENAME FROM URL
    * Generates a unique, safe filename from a URL. Handles different URL formats
@@ -189,7 +184,6 @@ window.SochStorage = {
       return prefix + Date.now() + '.jpg';
     }
   },
-
   /**
    * CHECK IF FILE EXISTS LOCALLY
    * Checks if a specific file already exists in local storage.
@@ -219,7 +213,6 @@ window.SochStorage = {
       return false; // Error means file doesn't exist
     }
   },
-
   /**
    * DOWNLOAD FILE WITH DUPLICATE PREVENTION
    * Downloads a file from URL to local storage, but only if:
@@ -259,13 +252,11 @@ window.SochStorage = {
         directory: 'DOCUMENTS',
         path: `${folderPath}/${fileName}`,
       });
-
       // Download the file from URL to local storage
       const result = await FileTransfer.downloadFile({
         url: url,
         path: fileUri.uri,
       });
-
       console.log("✅ Download completed:", fileName);
       this.downloadedUrls.add(url); // Mark URL as downloaded
       return result;
@@ -274,7 +265,6 @@ window.SochStorage = {
       throw new Error(`Download failed for ${fileName}: ${err.message}`);
     }
   },
-
   /**
    * GET LOCAL FILE URI
    * Gets the local file system URI for a file that should exist in storage.
@@ -301,7 +291,6 @@ window.SochStorage = {
       return null;
     }
   },
-
   /**
    * SAVE JSON DATA LOCALLY
    * Saves JSON collection data to local storage for offline access.
@@ -336,7 +325,6 @@ window.SochStorage = {
       throw new Error(`JSON save failed: ${err.message}`);
     }
   },
-
   /**
    * GET CURRENT JSON VERSION
    * Reads the locally stored JSON file and extracts the version number.
@@ -371,7 +359,6 @@ window.SochStorage = {
       return null;
     }
   },
-
   /**
    * READ LOCAL JSON DATA
    * Reads and returns the complete JSON data from local storage.
@@ -401,8 +388,112 @@ window.SochStorage = {
       console.log("❌ Failed to read local JSON data:", err.message);
       return null;
     }
+  },
+  /**
+   * CHECK IF PROCESSED LOCAL CONTENT EXISTS
+   * Checks if both processed JSON and HTML files exist locally
+   * This is used to determine if we can skip downloads entirely
+   * 
+   * @returns {Promise<Object>} - Object with hasJson and hasHtml boolean flags
+   */
+  checkProcessedLocalContent: async function() {
+    const config = window.SochConfig;
+    
+    if (!config.isCapacitor) {
+      return { hasJson: false, hasHtml: false };
+    }
+    
+    try {
+      const { Filesystem } = config.getPlugins();
+      let hasJson = false;
+      let hasHtml = false;
+      
+      // Check for processed JSON file
+      try {
+        await Filesystem.stat({
+          path: `${config.APP_FOLDER}/json/data.json`,
+          directory: 'DOCUMENTS'
+        });
+        hasJson = true;
+        console.log("✅ Processed JSON file found locally");
+      } catch (err) {
+        console.log("ℹ️ No processed JSON file found locally");
+      }
+      
+      // Check for processed HTML file
+      try {
+        await Filesystem.stat({
+          path: `${config.APP_FOLDER}/html/flipbook.html`,
+          directory: 'DOCUMENTS'
+        });
+        hasHtml = true;
+        console.log("✅ Processed HTML file found locally");
+      } catch (err) {
+        console.log("ℹ️ No processed HTML file found locally");
+      }
+      
+      return { hasJson, hasHtml };
+      
+    } catch (err) {
+      console.error("❌ Error checking local content:", err);
+      return { hasJson: false, hasHtml: false };
+    }
+  },
+  /**
+   * VERIFY LOCAL CONTENT INTEGRITY
+   * Verifies that local JSON contains processed local paths instead of remote URLs
+   * This ensures the content is ready for offline use
+   * 
+   * @returns {Promise<boolean>} - True if content is properly processed
+   */
+  verifyLocalContentIntegrity: async function() {
+    try {
+      const jsonData = await this.readLocalJsonData();
+      if (!jsonData || !jsonData.collections) {
+        return false;
+      }
+      
+      // Check if URLs have been replaced with ABSOLUTE file URIs
+      const collections = jsonData.collections;
+      let hasLocalPaths = false;
+      
+      Object.keys(collections).forEach(collectionKey => {
+        const collection = collections[collectionKey];
+        
+        // Check collection image - should start with file:// or capacitor://
+        if (collection.collection_image_url && 
+            (collection.collection_image_url.startsWith('file://') || 
+             collection.collection_image_url.startsWith('capacitor://'))) {
+          hasLocalPaths = true;
+        }
+        
+        // Check product images and videos
+        if (collection.products && Array.isArray(collection.products)) {
+          collection.products.forEach(product => {
+            // Check product image URL
+            if (product.image_url && 
+                (product.image_url.startsWith('file://') || 
+                 product.image_url.startsWith('capacitor://'))) {
+              hasLocalPaths = true;
+            }
+            // Check product video URL
+            if (product.video && 
+                (product.video.startsWith('file://') || 
+                 product.video.startsWith('capacitor://'))) {
+              hasLocalPaths = true;
+            }
+          });
+        }
+      });
+      
+      console.log("📊 Local content integrity check:", hasLocalPaths ? "PASSED" : "FAILED");
+      return hasLocalPaths;
+      
+    } catch (err) {
+      console.error("❌ Content integrity check failed:", err);
+      return false;
+    }
   }
 };
-
 // Log successful module loading
-console.log("✅ Storage module loaded");
+console.log("✅ Storage module loaded with enhanced version checking");

@@ -12,10 +12,9 @@
  * Dependencies: ALL other modules must be loaded before this file
  * Load order: config.js → network.js → storage.js → media.js → flipbook.js → ui.js → app.js
  */
-
 (function() {
   'use strict';
-
+  
   // Global state variables
   let isInitialized = false;
   let initializationInProgress = false;
@@ -29,7 +28,7 @@
    * 1. Request storage permissions
    * 2. Create folder structure
    * 3. Check internet connectivity
-   * 4. Load flipbook content (online/offline)
+   * 4. Load flipbook content (with smart caching and version checking)
    * 5. Show flipbook interface
    * 
    * The function handles both first-time setup and subsequent app launches.
@@ -40,7 +39,6 @@
       console.log("⚠️ Initialization already in progress, skipping duplicate call");
       return;
     }
-
     initializationInProgress = true;
 
     try {
@@ -70,20 +68,50 @@
       
       // Log connectivity result and set user expectations
       if (isOnline) {
-        console.log("✅ Device is online - will fetch latest content");
-        window.SochUI.updateProgress("Online - loading latest content...", true);
+        console.log("✅ Device is online - will check for updates");
+        window.SochUI.updateProgress("Online - checking for updates...", true);
       } else {
         console.log("📴 Device is offline - will use cached content");
         window.SochUI.updateProgress("Offline - loading cached content...", true);
       }
       
-      // STEP 4: LOAD FLIPBOOK CONTENT
-      console.log("📖 Step 4: Loading flipbook content...");
+      // STEP 4: CHECK LOCAL CONTENT STATUS
+      console.log("📊 Step 4: Checking local content status...");
+      const localContent = await window.SochStorage.checkProcessedLocalContent();
+      
+      if (localContent.hasJson && localContent.hasHtml) {
+        console.log("✅ Local processed content found");
+        
+        // Verify content integrity
+        const contentIntegrity = await window.SochStorage.verifyLocalContentIntegrity();
+        if (contentIntegrity) {
+          console.log("✅ Local content integrity verified");
+          
+          if (isOnline) {
+            window.SochUI.updateProgress("Checking for content updates...", true);
+          } else {
+            window.SochUI.updateProgress("Loading from local storage...", true);
+          }
+        } else {
+          console.log("⚠️ Local content integrity check failed - may need fresh download");
+          window.SochUI.updateProgress("Verifying content...", true);
+        }
+      } else {
+        console.log("ℹ️ Local processed content not found - first time setup needed");
+        if (isOnline) {
+          window.SochUI.updateProgress("First time setup - downloading content...", true);
+        } else {
+          window.SochUI.updateProgress("No local content available...", true);
+        }
+      }
+      
+      // STEP 5: LOAD FLIPBOOK CONTENT (with smart caching and version checking)
+      console.log("📖 Step 5: Loading flipbook content...");
       window.SochUI.updateProgress("Loading digital collection...", true);
       
       const flipbookLoaded = await window.SochFlipbook.loadFlipbook();
       
-      // STEP 5: HANDLE LOADING RESULT
+      // STEP 6: HANDLE LOADING RESULT
       if (flipbookLoaded) {
         console.log("🎉 Flipbook loaded successfully!");
         window.SochUI.showSuccess("Collection loaded successfully!");
@@ -261,5 +289,4 @@
   };
 
   console.log("✅ Main app module loaded and ready");
-
 })();

@@ -10,9 +10,7 @@
  * 
  * Dependencies: config.js, network.js (must be loaded first)
  */
-
 window.SochUI = {
-
   /**
    * UPDATE PROGRESS MESSAGE
    * Updates the main status area with current operation progress.
@@ -40,7 +38,6 @@ window.SochUI = {
       }
     }
   },
-
   /**
    * UPDATE BUTTON STATE
    * Changes the appearance and functionality of the main launch button.
@@ -62,7 +59,6 @@ window.SochUI = {
       console.log(`🔲 Button updated: "${text}" (${disabled ? 'disabled' : 'enabled'}, state: ${state})`);
     }
   },
-
   /**
    * UPDATE NETWORK STATUS INDICATOR
    * Updates the visual network status indicator in the header.
@@ -92,7 +88,6 @@ window.SochUI = {
       console.warn("⚠️ Network status element not found in UI");
     }
   },
-
   /**
    * UPDATE VERSION INFORMATION
    * Updates the version information display in the UI footer.
@@ -111,7 +106,6 @@ window.SochUI = {
       console.log("📱 Version info updated:", `JSON v${jsonVersion}, HTML v${htmlVersion}`);
     }
   },
-
   /**
    * SHOW SUCCESS MESSAGE
    * Displays a success message with green styling and checkmark icon.
@@ -127,7 +121,6 @@ window.SochUI = {
       this.updateButton("🎉 Launch Successful", false, 'success');
     }, 1000);
   },
-
   /**
    * SHOW ERROR MESSAGE
    * Displays an error message with red styling and error icon.
@@ -147,7 +140,6 @@ window.SochUI = {
       this.updateButton("❌ Launch Failed", true, 'error');
     }
   },
-
   /**
    * SHOW LOADING STATE
    * Sets the UI to loading state with spinner and progress message.
@@ -159,7 +151,6 @@ window.SochUI = {
     this.updateProgress(message, true); // Show with spinner
     this.updateButton("🔄 Loading...", true, 'loading');
   },
-
   /**
    * SHOW FLIPBOOK CONTAINER
    * Hides the main UI and shows the fullscreen flipbook container.
@@ -172,14 +163,21 @@ window.SochUI = {
       downloadBtn.style.display = 'none';
     }
     
+    // Hide the entire main screen
+    const mainScreen = document.getElementById('mainScreen');
+    if (mainScreen) {
+      mainScreen.style.display = 'none';
+    }
+    
     // Show the flipbook container in fullscreen
     const flipbookContainer = document.getElementById('flipbookContainer');
     if (flipbookContainer) {
       flipbookContainer.classList.add('active');
+      // Make sure it's visible
+      flipbookContainer.style.display = 'block';
       console.log("📖 Flipbook container displayed");
     }
   },
-
   /**
    * HIDE FLIPBOOK CONTAINER
    * Hides the flipbook and shows the main UI again.
@@ -190,6 +188,13 @@ window.SochUI = {
     const flipbookContainer = document.getElementById('flipbookContainer');
     if (flipbookContainer) {
       flipbookContainer.classList.remove('active');
+      flipbookContainer.style.display = 'none';
+    }
+    
+    // Show the main screen again
+    const mainScreen = document.getElementById('mainScreen');
+    if (mainScreen) {
+      mainScreen.style.display = 'block';
     }
     
     // Show the main launch interface again
@@ -202,7 +207,6 @@ window.SochUI = {
     this.updateProgress("Flipbook closed. Click to reopen your collection.");
     console.log("🔙 Returned to main interface");
   },
-
   /**
    * SETUP EVENT LISTENERS
    * Sets up all UI event listeners for button clicks and interactions.
@@ -217,11 +221,18 @@ window.SochUI = {
       });
       console.log("✅ Close button listener attached");
     }
-
+    
+    // Handle navigation return
+    window.addEventListener('message', (event) => {
+      if (event.data === 'returnFromFlipbook') {
+        console.log("📱 Received return message from flipbook");
+        this.hideFlipbook();
+      }
+    });
+    
     // Launch button listener (will be attached by main app)
     console.log("✅ UI event listeners setup completed");
   },
-
   /**
    * INITIALIZE UI STATE
    * Sets the initial state of all UI elements when app starts.
@@ -239,6 +250,13 @@ window.SochUI = {
     
     // Set initial version info
     this.updateVersionInfo('Checking...', 'Checking...');
+    
+    // Make sure flipbook container is hidden initially
+    const flipbookContainer = document.getElementById('flipbookContainer');
+    if (flipbookContainer) {
+      flipbookContainer.style.display = 'none';
+      flipbookContainer.classList.remove('active');
+    }
     
     console.log("✅ UI initialized to default state");
   }

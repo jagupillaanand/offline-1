@@ -7,7 +7,7 @@
 * - Duplicate prevention for same URLs
 * - URL replacement (remote to local paths)
 * - Media file organization and cleanup
-* - Blob URL creation for offline iframe video access
+* - Processing HTML to work with postMessage
 * 
 * Dependencies: config.js, storage.js (must be loaded first)
 */
@@ -338,11 +338,235 @@ window.SochMedia = {
      // Don't throw error - cleanup failure shouldn't stop the app
    }
  },
+ /**
+  * PROCESS JSON FILE IMMEDIATELY AFTER DOWNLOAD - FIXED FOR ABSOLUTE URIS
+  * Modifies the downloaded JSON file to replace remote URLs with ABSOLUTE local file URIs
+  * This ensures the JSON is always ready for offline use with proper file:// URLs
+  */
+ processDownloadedJsonFile: async function(jsonData) {
+   const config = window.SochConfig;
+   
+   if (!config.isCapacitor) {
+     console.log("📱 Browser mode - skipping JSON processing");
+     return;
+   }
+   try {
+     console.log("🔄 Processing downloaded JSON file with ABSOLUTE file URIs...");
+     
+     // Create a copy of the JSON data to modify
+     const modifiedJsonData = JSON.parse(JSON.stringify(jsonData));
+     const collections = modifiedJsonData.collections;
+     let replacementCount = 0;
+     
+     // Process each collection
+     for (const collectionKey of Object.keys(collections)) {
+       const collection = collections[collectionKey];
+       
+       // Replace collection banner image URL with ABSOLUTE file URI
+       if (collection.collection_image_url) {
+         const fileName = this.getFileNameFromUrl(
+           collection.collection_image_url, 
+           `collection_${collectionKey}_`
+         );
+         
+         // Create ABSOLUTE file URI instead of relative path
+         const { Filesystem } = config.getPlugins();
+         const fileUri = await Filesystem.getUri({
+           directory: 'DOCUMENTS',
+           path: `${config.APP_FOLDER}/images/${fileName}`,
+         });
+         
+         collection.collection_image_url = fileUri.uri;
+         console.log(`🔄 Replaced collection image URL: ${collectionKey} → ${fileUri.uri}`);
+         replacementCount++;
+       }
+       
+       // Replace product media URLs with ABSOLUTE file URIs
+       if (collection.products && Array.isArray(collection.products)) {
+         for (const product of collection.products) {
+           
+           // Replace product image URL with ABSOLUTE file URI
+           if (product.image_url) {
+             const fileName = this.getFileNameFromUrl(
+               product.image_url, 
+               `${product.style_code}_img_`
+             );
+             
+             const { Filesystem } = config.getPlugins();
+             const fileUri = await Filesystem.getUri({
+               directory: 'DOCUMENTS',
+               path: `${config.APP_FOLDER}/images/${fileName}`,
+             });
+             
+             product.image_url = fileUri.uri;
+             console.log(`🔄 Replaced product image URL: ${product.style_code} → ${fileUri.uri}`);
+             replacementCount++;
+           }
+           
+           // Replace product video URL with ABSOLUTE file URI
+           if (product.video) {
+             const fileName = this.getFileNameFromUrl(
+               product.video, 
+               `${product.style_code}_vid_`
+             );
+             
+             const { Filesystem } = config.getPlugins();
+             const fileUri = await Filesystem.getUri({
+               directory: 'DOCUMENTS',
+               path: `${config.APP_FOLDER}/videos/${fileName}`,
+             });
+             
+             product.video = fileUri.uri;
+             console.log(`🔄 Replaced product video URL: ${product.style_code} → ${fileUri.uri}`);
+             replacementCount++;
+           }
+         }
+       }
+     }
+     
+     // Save the modified JSON back to the file with ABSOLUTE URIs
+     const { Filesystem } = config.getPlugins();
+     await Filesystem.writeFile({
+       path: `${config.APP_FOLDER}/json/data.json`,
+       directory: 'DOCUMENTS',
+       data: JSON.stringify(modifiedJsonData, null, 2),
+       encoding: 'utf8'
+     });
+     
+     console.log(`✅ JSON processing completed - ${replacementCount} URLs replaced with ABSOLUTE file URIs`);
+     
+   } catch (err) {
+     console.error("❌ Error processing JSON file:", err);
+     throw new Error(`JSON processing failed: ${err.message}`);
+   }
+ },
+ /**
+  * PROCESS HTML FILE FOR POSTMESSAGE COMMUNICATION
+  * Modifies the downloaded HTML file to work with postMessage from parent
+  */
+ processDownloadedHtmlFile: async function() {
+   const config = window.SochConfig;
+   
+   if (!config.isCapacitor) {
+     console.log("📱 Browser mode - skipping HTML processing");
+     return;
+   }
+   
+   try {
+     console.log("🔄 Processing downloaded HTML file for postMessage...");
+     
+     const { Filesystem } = config.getPlugins();
+     
+     // Read the downloaded HTML file
+     const htmlContent = await Filesystem.readFile({
+       path: `${config.APP_FOLDER}/html/flipbook.html`,
+       directory: 'DOCUMENTS',
+       encoding: 'utf8'
+     });
+     
+     let modifiedHtml = htmlContent.data;
+     
+     // Add postMessage listener to receive collections data
+     const postMessageScript = `
+     <script>
+     // Listen for collections data from parent
+     window.addEventListener('message', function(event) {
+       console.log('📨 Flipbook received message:', event.data.type);
+       
+       if (event.data.type === 'loadCollections' && event.data.collections) {
+         // Store collections globally
+         window.collections = event.data.collections;
+         console.log('✅ Collections data received:', Object.keys(window.collections));
+         
+         // If loadCollections function exists, call it
+         if (typeof window.loadCollections === 'function') {
+           window.loadCollections();
+         } else if (typeof renderCollections === 'function') {
+           // If renderCollections exists, call it directly
+           renderCollections();
+         }
+       }
+     });
+     
+     // Override loadCollections to work with postMessage data
+     window.loadCollections = function() {
+       console.log('🎬 loadCollections called');
+       
+       if (!window.collections) {
+         console.log('⏳ Waiting for collections data from parent...');
+         document.getElementById('loading').innerHTML = '<p>Waiting for data...</p>';
+         return;
+       }
+       
+       // Collections are available, render them
+       console.log('✅ Rendering collections...');
+       renderCollections();
+     };
+     
+     // Also call loadCollections when DOM is ready in case data arrives early
+     document.addEventListener('DOMContentLoaded', function() {
+       console.log('📄 Flipbook DOM loaded');
+       if (window.collections) {
+         loadCollections();
+       }
+     });
+     </script>
+     `;
+     
+     // Insert the postMessage script right after opening head tag
+     modifiedHtml = modifiedHtml.replace('<head>', '<head>\n' + postMessageScript);
+     
+     // Remove or comment out the original API fetch
+     const apiUrl = 'https://sjwmfjykydevvyoldnqo.supabase.co/rest/v1/mobile_app_release?select=json';
+     if (modifiedHtml.includes(apiUrl)) {
+       // Comment out the original loadCollections function
+       modifiedHtml = modifiedHtml.replace(
+         'async function loadCollections() {',
+         '/* DISABLED - Using postMessage data\nasync function loadCollections_ORIGINAL() {'
+       );
+       
+       // Find and close the comment
+       let braceCount = 0;
+       let inFunction = false;
+       let startIndex = modifiedHtml.indexOf('loadCollections_ORIGINAL');
+       
+       if (startIndex !== -1) {
+         for (let i = startIndex; i < modifiedHtml.length; i++) {
+           if (modifiedHtml[i] === '{') {
+             braceCount++;
+             inFunction = true;
+           } else if (modifiedHtml[i] === '}' && inFunction) {
+             braceCount--;
+             if (braceCount === 0) {
+               // Found the closing brace
+               modifiedHtml = modifiedHtml.slice(0, i + 1) + '\n*/\n' + modifiedHtml.slice(i + 1);
+               break;
+             }
+           }
+         }
+       }
+     }
+     
+     // Save the modified HTML file
+     await Filesystem.writeFile({
+       path: `${config.APP_FOLDER}/html/flipbook.html`,
+       directory: 'DOCUMENTS',
+       data: modifiedHtml,
+       encoding: 'utf8'
+     });
+     
+     console.log("✅ HTML processing completed - ready for postMessage communication");
+     
+   } catch (err) {
+     console.error("❌ Error processing HTML file:", err);
+     throw new Error(`HTML processing failed: ${err.message}`);
+   }
+ },
  
  /**
-  * DOWNLOAD ALL MEDIA FILES
+  * DOWNLOAD ALL MEDIA FILES WITH IMMEDIATE PROCESSING
   * Downloads all unique media files from the JSON data with progress tracking.
-  * FIXED: Uses direct Dropbox URLs and better error handling.
+  * PROCESSES JSON AND HTML FILES IMMEDIATELY AFTER DOWNLOAD.
   * 
   * @param {Object} jsonData - The collection JSON data containing media URLs
   * @returns {Promise<void>}
@@ -411,7 +635,12 @@ window.SochMedia = {
        console.warn(`⚠️ ${errorCount} files failed to download - app will use remote URLs for those`);
      }
      
-     // Step 4: Cleanup unused files after downloads
+     // Step 4: IMMEDIATELY PROCESS THE JSON FILE WITH ABSOLUTE URIS
+     console.log("🔄 Processing JSON file with ABSOLUTE file URIs...");
+     window.SochUI.updateProgress("Processing downloaded content...", true);
+     await this.processDownloadedJsonFile(jsonData);
+     
+     // Step 5: Cleanup unused files after downloads
      await this.cleanupUnusedFiles(jsonData);
      
    } catch (err) {
@@ -419,61 +648,34 @@ window.SochMedia = {
      throw new Error(`Media download failed: ${err.message}`);
    }
  },
- 
  /**
-  * CREATE BLOB URL FROM LOCAL VIDEO FILE
-  * Reads a local video file and creates a Blob URL for iframe access.
-  * This solves the offline video issue by bypassing iframe security restrictions.
-  * 
-  * @param {string} localUri - The local file URI (file://....)
-  * @returns {Promise<string>} - Blob URL that works in iframes
+  * PROCESS HTML FILE AFTER DOWNLOAD
+  * This function should be called after HTML file is downloaded
   */
- createVideoBlobUrl: async function(localUri) {
+ processHtmlAfterDownload: async function() {
    const config = window.SochConfig;
    
-   if (!config.isCapacitor || !localUri.startsWith('file://')) {
-     return localUri;
+   if (!config.isCapacitor) {
+     console.log("📱 Browser mode - skipping HTML processing");
+     return;
    }
-   
    try {
-     console.log("🎥 Creating Blob URL for offline video access");
-     console.log(`🔄 Original file:// URL: ${localUri}`);
-     
-     const { Filesystem } = config.getPlugins();
-     
-     // Extract filename from the file path
-     const fileName = localUri.split('/').pop();
-     
-     // Read the video file as base64
-     const fileData = await Filesystem.readFile({
-       path: `${config.APP_FOLDER}/videos/${fileName}`,
-       directory: 'DOCUMENTS',
-       encoding: 'base64'
-     });
-     
-     // Convert base64 to Blob
-     const byteCharacters = atob(fileData.data);
-     const byteNumbers = new Array(byteCharacters.length);
-     for (let i = 0; i < byteCharacters.length; i++) {
-       byteNumbers[i] = byteCharacters.charCodeAt(i);
-     }
-     const byteArray = new Uint8Array(byteNumbers);
-     const blob = new Blob([byteArray], { type: 'video/mp4' });
-     
-     // Create Blob URL
-     const blobUrl = URL.createObjectURL(blob);
-     
-     // Track for cleanup
-     this.activeBlobUrls.add(blobUrl);
-     
-     console.log(`🔄 Created Blob URL: ${blobUrl}`);
-     return blobUrl;
-     
+     console.log("🔄 Processing HTML file for local storage...");
+     window.SochUI.updateProgress("Optimizing HTML for offline use...", true);
+     await this.processDownloadedHtmlFile();
    } catch (err) {
-     console.error("❌ Failed to create Blob URL for video:", err);
-     console.log("🔄 Falling back to original URL");
-     return localUri;
+     console.error("❌ HTML processing failed:", err);
+     throw new Error(`HTML processing failed: ${err.message}`);
    }
+ },
+ 
+ /**
+  * CREATE BLOB URL FROM LOCAL VIDEO FILE - DEPRECATED
+  * This function is no longer needed since we use absolute file URIs
+  */
+ createVideoBlobUrl: async function(localUri) {
+   console.log("⚠️ createVideoBlobUrl called - this should not be needed with absolute URIs");
+   return localUri;
  },
  
  /**
@@ -491,136 +693,20 @@ window.SochMedia = {
  },
  
  /**
-  * CONVERT VIDEO URL FOR MOBILE PLAYBACK - FIXED FOR OFFLINE IFRAME ACCESS
-  * Creates Blob URLs for offline videos to work in iframes.
-  * This is the key function that solves the offline video issue.
-  * 
-  * @param {string} localUri - The local file URI
-  * @returns {Promise<string>} - Blob URL for iframe compatibility
-  */
- convertVideoUrlForMobile: async function(localUri) {
-   const config = window.SochConfig;
-   
-   // Browser mode - no conversion needed
-   if (!config.isCapacitor) {
-     return localUri;
-   }
-   
-   // Check if we're offline
-   const isOffline = !window.SochNetwork.isOnline;
-   
-   if (localUri && localUri.startsWith('file://') && isOffline) {
-     // Offline mode: Create Blob URL for iframe access
-     return await this.createVideoBlobUrl(localUri);
-   } else if (localUri && localUri.startsWith('file://')) {
-     // Online mode: Use capacitor URL
-     console.log("🎥 Converting to capacitor URL for online iframe access");
-     const capacitorUrl = localUri.replace('file://', 'capacitor://localhost/_capacitor_file_');
-     console.log(`🔄 Original: ${localUri}`);
-     console.log(`🔄 Converted: ${capacitorUrl}`);
-     return capacitorUrl;
-   }
-   
-   return localUri;
- },
- 
- /**
-  * REPLACE REMOTE URLS WITH LOCAL PATHS
-  * Processes the JSON data and replaces all remote URLs with local file paths.
-  * FIXED: Creates Blob URLs for offline video access in iframes.
+  * REPLACE REMOTE URLS WITH LOCAL PATHS - NOW DEPRECATED
+  * This function is no longer needed since we process files immediately after download
+  * Keeping it for compatibility but it should not be used in the new flow
   * 
   * @param {Object} jsonData - Original JSON data with remote URLs
   * @returns {Object} - Modified JSON data with iframe-compatible local URIs
   */
  replaceUrlsWithLocalPaths: async function(jsonData) {
-   const config = window.SochConfig;
+   console.log("⚠️ replaceUrlsWithLocalPaths called - this should not happen in the new flow");
+   console.log("⚠️ JSON should already be processed with ABSOLUTE file URIs");
    
-   // In browser mode, keep using remote URLs
-   if (!config.isCapacitor) {
-     console.log("📱 Browser mode - keeping remote URLs");
-     return jsonData;
-   }
-   try {
-     console.log("🔄 Starting URL replacement process...");
-     
-     // Create deep copy to avoid modifying original data
-     const modifiedData = JSON.parse(JSON.stringify(jsonData));
-     const collections = modifiedData.collections;
-     let replacementCount = 0;
-     
-     // Process each collection
-     for (const collectionKey of Object.keys(collections)) {
-       const collection = collections[collectionKey];
-       
-       // Replace collection banner image URL
-       if (collection.collection_image_url) {
-         const fileName = this.getFileNameFromUrl(
-           collection.collection_image_url, 
-           `collection_${collectionKey}_`
-         );
-         const localUri = await window.SochStorage.getLocalFileUri('images', fileName);
-         
-         if (localUri) {
-           collection.collection_image_url = localUri;
-           console.log(`🔄 Replaced collection image URL: ${collectionKey}`);
-           replacementCount++;
-         } else {
-           console.log(`⚠️ Local file not found for collection image: ${collectionKey}, keeping remote URL`);
-         }
-       }
-       
-       // Replace product media URLs
-       if (collection.products && Array.isArray(collection.products)) {
-         for (const product of collection.products) {
-           
-           // Replace product image URL
-           if (product.image_url) {
-             const fileName = this.getFileNameFromUrl(
-               product.image_url, 
-               `${product.style_code}_img_`
-             );
-             const localUri = await window.SochStorage.getLocalFileUri('images', fileName);
-             
-             if (localUri) {
-               product.image_url = localUri;
-               console.log(`🔄 Replaced product image URL: ${product.style_code}`);
-               replacementCount++;
-             } else {
-               console.log(`⚠️ Local file not found for product image: ${product.style_code}, keeping remote URL`);
-             }
-           }
-           
-           // Replace product video URL with Blob URL for offline iframe access
-           if (product.video) {
-             const fileName = this.getFileNameFromUrl(
-               product.video, 
-               `${product.style_code}_vid_`
-             );
-             const localUri = await window.SochStorage.getLocalFileUri('videos', fileName);
-             
-             if (localUri) {
-               // FIXED: Create Blob URL for offline iframe access
-               product.video = await this.convertVideoUrlForMobile(localUri);
-               console.log(`🔄 Replaced product video URL: ${product.style_code}`);
-               replacementCount++;
-             } else {
-               console.log(`⚠️ Local file not found for product video: ${product.style_code}, keeping remote URL`);
-             }
-           }
-         }
-       }
-     }
-     
-     console.log(`✅ URL replacement completed - ${replacementCount} URLs replaced with local paths`);
-     return modifiedData;
-     
-   } catch (err) {
-     console.error("❌ Error during URL replacement:", err);
-     console.log("⚠️ Falling back to original data with remote URLs");
-     return jsonData; // Return original data if replacement fails
-   }
+   // Simply return the data as-is since it should already be processed
+   return jsonData;
  }
 };
-
 // Log successful module loading
-console.log("✅ Media module loaded with Blob URL support for offline videos");
+console.log("✅ Media module loaded - PostMessage mode for iframe communication");

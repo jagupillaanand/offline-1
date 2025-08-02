@@ -20,7 +20,7 @@ window.SochConfig = {
    * on the device's local storage
    */
   APP_FOLDER: "SochApp", // Main folder name in Documents directory
-  SUBFOLDERS: ["html", "json", "images", "videos"], // Subfolders for organized storage
+  SUBFOLDERS: ["html", "json", "images", "videos"], // Removed "js"
   
   /**
    * API CONFIGURATION
